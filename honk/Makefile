@@ -10,7 +10,9 @@
 # nightly toolchain pinned in crates/honk-ebpf/rust-toolchain.toml, compiles
 # honk-core with the crate's own pinned stable toolchain, and uses the OpenWrt
 # cross gcc/g++ of the SDK (TARGET_CROSS) for BoringSSL, SQLite and the final
-# link. The version reported by the binary is HONK_VERSION (debug-<date>).
+# link. HONK_VERSION is the package version (0.0.1_beta84, apk spells the beta
+# pre-release with "_beta") and HONK_GIT_TAG the upstream tag the sources come
+# from (v0.0.1.beta.84), which is the version honk's build script embeds.
 #
 # This file is free software, licensed under the GNU General Public License v3
 # or later.
@@ -23,8 +25,12 @@ PKG_DIR:=$(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
-PKG_VERSION:=$(if $(HONK_VERSION),$(HONK_VERSION),debug)
+PKG_VERSION:=$(if $(HONK_VERSION),$(HONK_VERSION),0.0.1_beta84)
 PKG_RELEASE:=1
+
+# Upstream release the sources are checked out from. honk's build script derives
+# the version it embeds from the tag in GITHUB_REF, so build.sh exports it.
+HONK_GIT_TAG:=$(if $(HONK_GIT_TAG),$(HONK_GIT_TAG),v0.0.1.beta.84)
 
 PKG_LICENSE:=GPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
@@ -63,6 +69,7 @@ endef
 define Build/Compile
 	HONK_SRC="$(PKG_BUILD_DIR)" \
 	HONK_VERSION="$(PKG_VERSION)" \
+	HONK_GIT_TAG="$(HONK_GIT_TAG)" \
 	HONK_ARCH_PACKAGES="$(ARCH_PACKAGES)" \
 	OPENWRT_CC="$(TARGET_CROSS)gcc" \
 	OPENWRT_CXX="$(TARGET_CROSS)g++" \

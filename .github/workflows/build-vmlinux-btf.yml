@@ -45,9 +45,12 @@ name: Build vmlinux (BTF)
 # different kernel .config, swap in another target/subtarget that reports the
 # same arch_packages (check profiles.json of that target).
 #
-# Two userspace packages from the daeuniverse project are built as well and
-# published in the same release, one per OpenWrt architecture. Their build
-# recipes live in this repository, whose root doubles as an OpenWrt feed:
+# Three packages are built from this repository, whose root doubles as an
+# OpenWrt feed, and published in the same release, one per OpenWrt
+# architecture:
+#   vmlinux-btf/ - package "vmlinux-btf": the detached BTF blob of that
+#           architecture, installed as /usr/lib/debug/boot/vmlinux plus the
+#           vmlinux-<kernel.release> symlink; its version is the kernel version
 #   dae/  - package "dae": Go, statically linked (CGO_ENABLED=0); no target C
 #           compiler is involved, its eBPF objects are compiled by clang
 #   honk/ - package "honk": Rust, cross compiled with the OpenWrt SDK toolchain:
@@ -58,26 +61,28 @@ name: Build vmlinux (BTF)
 # toolchains, the prebuilt bpf-linker) and then let the SDK build the packages,
 # so the assets are real OpenWrt packages (.apk on 25.x, .ipk on older releases).
 #
-# Naming of the archive and the uploaded artifact:
-#   <openwrt_version>-vmlinux-<openwrt_arch>-<kernel_version>
-#   e.g. 25.12.5-vmlinux-aarch64_cortex-a53-6.12.94.tar.xz
+# Naming of the assets:
+#   <openwrt_version>-vmlinux-<openwrt_arch>-<kernel_version>.tar.xz
+#   <openwrt_version>-vmlinux-btf-<openwrt_arch>-<kernel_version>.apk
+#   <openwrt_version>-dae-<dae_version>-<openwrt_arch>.apk
+#   <openwrt_version>-honk-<honk_version>-<openwrt_arch>.apk
+#   e.g. 25.12.5-vmlinux-btf-aarch64_cortex-a53-6.12.94.apk
 # Each vmlinux archive holds a single file named "vmlinux": the detached BTF
 # data, which is the same file upstream installs as
-# /usr/lib/debug/boot/vmlinux (plus the vmlinux-<release> symlink on the device).
+# /usr/lib/debug/boot/vmlinux (plus the vmlinux-<release> symlink on the
+# device). The vmlinux-btf package ships exactly that file, so a device can get
+# it with "apk add" instead of unpacking the archive.
 #
-# The userspace packages do not depend on the kernel version, so they carry a
-# release tag and a build date instead of it, following what upstream
-# publishes (dae has a rolling nightly build, honk has a rolling debug build):
-#   <openwrt_version>-dae-nightly-<openwrt_arch>-<date>.apk
-#   <openwrt_version>-honk-debug-<openwrt_arch>-<date>.apk
-#   e.g. 25.12.5-dae-nightly-aarch64_cortex-a53-2026-09-25.apk
-# <date> is the build date in "date -I" form, resolved once in the prepare job
-# with TZ=Asia/Shanghai (the day boundary dae uses for its own nightly build,
-# so a UTC evening run is not labelled with yesterday). The same
-# "nightly-<date>" / "debug-<date>" string is the package version and the
-# version the binaries report: it is DAE_VERSION / HONK_VERSION for the package
-# Makefiles, and honk derives HONK_VERSION from GITHUB_REF, so the build script
-# exports a "refs/tags/debug-<date>" ref.
+# The userspace packages are pinned to upstream releases and therefore do not
+# depend on the kernel version (the versions live in the prepare job):
+#   dae  - tag v2.1.1,            package version 2.1.1
+#   honk - tag v0.0.1.beta.84,    package version 0.0.1_beta84
+# apk spells a pre-release with "_beta" ("~" is reserved for a commit hash), so
+# the honk tag cannot be used verbatim as the package version. The package
+# version is the version the binaries report as well: it is passed to the
+# package Makefiles as DAE_VERSION / HONK_VERSION, dae's own make receives it as
+# VERSION, and honk derives what it embeds from GITHUB_REF, so build.sh exports
+# a "refs/tags/v0.0.1.beta.84" ref for it.
 #
 # All architectures sharing the same kernel version are published together in
 # one GitHub Release with the gh CLI, tagged:
@@ -116,7 +121,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       openwrt_version: ${{ steps.resolve.outputs.openwrt_version }}
-      build_date: ${{ steps.resolve.outputs.build_date }}
       matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - name: Resolve SDK, kernel version and matrix
@@ -140,11 +144,16 @@ jobs:
             exit 1
           fi
 
-          # Version number of the userspace assets, in "date -I" form. Resolved
-          # once here so every job of a run uses the same value. The timezone
-          # matches the day boundary upstream dae uses for its nightly builds.
-          BUILD_DATE="$(TZ=Asia/Shanghai date -I)"
-          echo "Userspace build date: ${BUILD_DATE}"
+          # The userspace packages are pinned to upstream releases. The package
+          # version is what the binaries report as well, so it is passed to the
+          # package Makefiles. honk is tagged v0.0.1.beta.84, but apk spells a
+          # beta pre-release with "_beta" ("~" means a commit hash), hence
+          # 0.0.1_beta84 while the sources come from the tag itself.
+          DAE_VERSION="2.1.1"
+          DAE_GIT_TAG="v2.1.1"
+          HONK_VERSION="0.0.1_beta84"
+          HONK_GIT_TAG="v0.0.1.beta.84"
+          echo "Userspace versions: dae ${DAE_VERSION} (${DAE_GIT_TAG}), honk ${HONK_VERSION} (${HONK_GIT_TAG})"
 
           : > /tmp/matrix.jsonl
           {
@@ -185,12 +194,13 @@ jobs:
             fi
 
             dist_name="${OPENWRT_VERSION}-vmlinux-${openwrt_arch}-${kernel_version}"
-            # The userspace assets are not tied to the kernel version: they carry
-            # the upstream release tag (nightly for dae, debug for honk) and the
-            # build date, so they are named here and reused by the build and
-            # release jobs instead of being derived from the kernel version
-            dae_dist_name="${OPENWRT_VERSION}-dae-nightly-${openwrt_arch}-${BUILD_DATE}"
-            honk_dist_name="${OPENWRT_VERSION}-honk-debug-${openwrt_arch}-${BUILD_DATE}"
+            # The BTF package depends on the kernel, so its version (and name)
+            # carries the kernel version; the userspace packages are pinned to
+            # upstream releases and only carry that version, so they are named
+            # here and reused by the build and release jobs
+            btf_dist_name="${OPENWRT_VERSION}-vmlinux-btf-${openwrt_arch}-${kernel_version}"
+            dae_dist_name="${OPENWRT_VERSION}-dae-${DAE_VERSION}-${openwrt_arch}"
+            honk_dist_name="${OPENWRT_VERSION}-honk-${HONK_VERSION}-${openwrt_arch}"
 
             jq -nc \
               --arg openwrt_arch "${openwrt_arch}" \
@@ -201,10 +211,14 @@ jobs:
               --arg sdk_url "${url}/${sdk_name}" \
               --arg sdk_name "${sdk_name}" \
               --arg dist_name "${dist_name}" \
-              --arg build_date "${BUILD_DATE}" \
+              --arg btf_dist_name "${btf_dist_name}" \
+              --arg dae_version "${DAE_VERSION}" \
+              --arg dae_git_tag "${DAE_GIT_TAG}" \
               --arg dae_dist_name "${dae_dist_name}" \
+              --arg honk_version "${HONK_VERSION}" \
+              --arg honk_git_tag "${HONK_GIT_TAG}" \
               --arg honk_dist_name "${honk_dist_name}" \
-              '{openwrt_arch:$openwrt_arch,target:$target,subtarget:$subtarget,kernel_arch:$kernel_arch,kernel_version:$kernel_version,sdk_url:$sdk_url,sdk_name:$sdk_name,dist_name:$dist_name,build_date:$build_date,dae_dist_name:$dae_dist_name,honk_dist_name:$honk_dist_name}' \
+              '{openwrt_arch:$openwrt_arch,target:$target,subtarget:$subtarget,kernel_arch:$kernel_arch,kernel_version:$kernel_version,sdk_url:$sdk_url,sdk_name:$sdk_name,dist_name:$dist_name,btf_dist_name:$btf_dist_name,dae_version:$dae_version,dae_git_tag:$dae_git_tag,dae_dist_name:$dae_dist_name,honk_version:$honk_version,honk_git_tag:$honk_git_tag,honk_dist_name:$honk_dist_name}' \
               >> /tmp/matrix.jsonl
 
             echo "| ${openwrt_arch} | ${target}/${subtarget} | ${kernel_version} | ${sdk_name} |" >> "$GITHUB_STEP_SUMMARY"
@@ -221,22 +235,22 @@ jobs:
 
           {
             echo ""
-            echo "Userspace binaries: dae \`nightly-${BUILD_DATE}\`, honk \`debug-${BUILD_DATE}\` (one build per architecture)."
+            echo "Packages: vmlinux-btf \`<kernel version>\` (one per architecture), dae \`${DAE_VERSION}\` (tag \`${DAE_GIT_TAG}\`), honk \`${HONK_VERSION}\` (tag \`${HONK_GIT_TAG}\`)."
           } >> "$GITHUB_STEP_SUMMARY"
 
           {
             echo "openwrt_version=${OPENWRT_VERSION}"
-            echo "build_date=${BUILD_DATE}"
             echo "matrix=$(jq -sc . /tmp/matrix.jsonl)"
           } >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
-  # 2. Generate one detached BTF blob per OpenWrt architecture
+  # 2. Generate one detached BTF blob (and its package) per OpenWrt architecture
   #
   # This follows the current upstream implementation: small stub units are
   # compiled against the kernel headers the SDK already prepared, and pahole
   # converts their DWARF into BTF. No kernel source is downloaded and no kernel
-  # is built.
+  # is built. The same blob is then packaged with the SDK (vmlinux-btf), so the
+  # archive and the installable package always hold identical bytes.
   # ---------------------------------------------------------------------------
   build:
     name: Build vmlinux (${{ matrix.openwrt_arch }})
@@ -256,6 +270,7 @@ jobs:
       SDK_URL: ${{ matrix.sdk_url }}
       SDK_NAME: ${{ matrix.sdk_name }}
       DIST_NAME: ${{ matrix.dist_name }}
+      BTF_DIST_NAME: ${{ matrix.btf_dist_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -264,9 +279,11 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          # pahole (dwarves) is the only build tool the SDK does not provide
+          # pahole (dwarves) is the only build tool the SDK does not provide,
+          # the rest is what the SDK's own make and package build expect
           sudo apt-get install -y --no-install-recommends \
-            dwarves xz-utils zstd tar curl ca-certificates file
+            dwarves xz-utils zstd tar curl ca-certificates file \
+            build-essential bzip2 perl python3 rsync unzip git
 
       - name: Check pahole
         run: |
@@ -337,9 +354,21 @@ jobs:
               exit 1
             fi
           done
-          if [ ! -f "${KDIR}/include/config/kernel.release" ]; then
-            echo "::warning::The SDK kernel tree has no include/config/kernel.release, the device-side vmlinux-<release> symlink name would fall back to ${KERNEL_VERSION}"
+          # The symlink the package installs next to the blob, vmlinux-<release>,
+          # has to match the uname -r of the device. The SDK does not keep
+          # include/config/kernel.release, so fall back to UTS_RELEASE of the
+          # generated header, which is what uname prints.
+          KERNEL_RELEASE=""
+          if [ -f "${KDIR}/include/config/kernel.release" ]; then
+            KERNEL_RELEASE="$(cat "${KDIR}/include/config/kernel.release")"
+          elif [ -f "${KDIR}/include/generated/utsrelease.h" ]; then
+            KERNEL_RELEASE="$(sed -n 's/^#define UTS_RELEASE "\(.*\)"$/\1/p' "${KDIR}/include/generated/utsrelease.h")"
           fi
+          if [ -z "${KERNEL_RELEASE}" ]; then
+            KERNEL_RELEASE="${KERNEL_VERSION}"
+            echo "::warning::The SDK kernel tree has neither include/config/kernel.release nor UTS_RELEASE, using ${KERNEL_RELEASE} for the vmlinux-<release> symlink"
+          fi
+          echo "Kernel release: ${KERNEL_RELEASE}"
 
           sdk_kernel_version="${KDIR##*/linux-}"
           echo "Kernel tree: ${KDIR}"
@@ -375,6 +404,7 @@ jobs:
           {
             echo "SDK_DIR=${SDK_DIR}"
             echo "KDIR=${KDIR}"
+            echo "KERNEL_RELEASE=${KERNEL_RELEASE}"
             echo "CROSS_COMPILE=${cross_prefix}"
             echo "STAGING_DIR=${staging_dir}"
             echo "STAGING_DIR_HOST=${SDK_DIR}/staging_dir/host"
@@ -579,6 +609,55 @@ jobs:
           ls -lh "${OUT}/vmlinux"
           file "${OUT}/vmlinux" || true
 
+      # The same blob is also an installable package: the repository root is the
+      # feed, so the SDK turns vmlinux-btf/ into an apk (ipk on older releases)
+      - name: Build the vmlinux-btf package with the SDK
+        run: |
+          set -euo pipefail
+
+          cd "${SDK_DIR}"
+          printf 'src-link local %s\n' "${GITHUB_WORKSPACE}" > feeds.conf
+          ./scripts/feeds update local
+          ./scripts/feeds install -p local vmlinux-btf
+
+          echo "CONFIG_PACKAGE_vmlinux-btf=m" >> .config
+          make defconfig
+
+          # The kernel version is the package version, and the blob is the one
+          # this job just encoded: the package only installs it
+          VMLINUX_BTF_VERSION="${KERNEL_VERSION}" \
+          VMLINUX_BTF_KERNEL_RELEASE="${KERNEL_RELEASE}" \
+          VMLINUX_BTF_SRC="${RUNNER_TEMP}/btf/vmlinux" \
+            make package/vmlinux-btf/compile V=s
+
+      - name: Collect the vmlinux-btf package
+        run: |
+          set -euo pipefail
+
+          mapfile -t found < <(find "${SDK_DIR}/bin/packages" \
+            \( -name 'vmlinux-btf-*.apk' -o -name 'vmlinux-btf_*.ipk' \) | sort)
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one vmlinux-btf package, found ${#found[@]}"
+            find "${SDK_DIR}/bin" -type f | sed -n '1,50p' || true
+            exit 1
+          fi
+
+          # OpenWrt 25.x publishes apk, older releases ipk
+          ext="${found[0]##*.}"
+          mkdir -p dist
+          cp "${found[0]}" "dist/${BTF_DIST_NAME}.${ext}"
+          ( cd dist && sha256sum "${BTF_DIST_NAME}.${ext}" | tee "${BTF_DIST_NAME}.${ext}.sha256" )
+
+          {
+            echo "### ${BTF_DIST_NAME}"
+            echo ""
+            echo "- Package: \`$(basename "${found[0]}")\`"
+            echo "- Version: \`${KERNEL_VERSION}\` (kernel version)"
+            echo "- Kernel release: \`${KERNEL_RELEASE}\`"
+            echo "- OpenWrt arch: \`${OPENWRT_ARCH}\`"
+            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${BTF_DIST_NAME}.${ext}.sha256")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Package ${{ matrix.dist_name }}.tar.xz
         run: |
           set -euo pipefail
@@ -593,19 +672,22 @@ jobs:
           ls -lh "${OUT_DIR}/vmlinux"
 
           ARCHIVE="${DIST_NAME}.tar.xz"
-          tar -C "${OUT_DIR}" -cf - vmlinux | xz -T0 -6 > "${GITHUB_WORKSPACE}/${ARCHIVE}"
+          # Everything of this job is collected in dist/, so the uploaded
+          # artifact has a single root and the release job finds the files flat
+          mkdir -p dist
+          tar -C "${OUT_DIR}" -cf - vmlinux | xz -T0 -6 > "dist/${ARCHIVE}"
 
-          sha256sum "${GITHUB_WORKSPACE}/${ARCHIVE}" | tee "${GITHUB_WORKSPACE}/${ARCHIVE}.sha256"
+          sha256sum "dist/${ARCHIVE}" | tee "dist/${ARCHIVE}.sha256"
 
           echo "===== Archive contents ====="
-          tar -tvJf "${GITHUB_WORKSPACE}/${ARCHIVE}"
-          ls -lh "${GITHUB_WORKSPACE}/${ARCHIVE}"
+          tar -tvJf "dist/${ARCHIVE}"
+          ls -lh "dist/${ARCHIVE}"
 
           {
             echo "### ${DIST_NAME}"
             echo ""
             echo '```'
-            tar -tvJf "${GITHUB_WORKSPACE}/${ARCHIVE}"
+            tar -tvJf "dist/${ARCHIVE}"
             echo '```'
             echo ""
             echo "- OpenWrt version: \`${OPENWRT_VERSION}\`"
@@ -613,17 +695,15 @@ jobs:
             echo "- Kernel version: \`${KERNEL_VERSION}\`"
             echo "- Kernel headers: \`${KDIR}\`"
             echo "- pahole: \`$(pahole --version)\`"
-            echo "- SHA256: \`$(cut -d' ' -f1 "${GITHUB_WORKSPACE}/${ARCHIVE}.sha256")\`"
+            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${ARCHIVE}.sha256")\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.dist_name }}
-          path: |
-            ${{ matrix.dist_name }}.tar.xz
-            ${{ matrix.dist_name }}.tar.xz.sha256
-          # Already xz-compressed, no need to compress again
+          path: dist/*
+          # Already compressed, no need to compress again
           compression-level: 0
           if-no-files-found: error
           retention-days: 30
@@ -635,6 +715,7 @@ jobs:
   # only install the toolchains and let the SDK build them. dae is pure Go
   # (CGO_ENABLED=0); honk uses the SDK cross toolchain because its C/C++
   # dependencies and the final link need the target compiler and musl.
+  # Both are pinned to upstream release tags, the versions come from the matrix.
   # ---------------------------------------------------------------------------
   dae:
     name: Build dae (${{ matrix.openwrt_arch }})
@@ -647,11 +728,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
-      # No kernel version here: these assets are named by release tag and build
-      # date (see the header comment), so only the version source matters
+      # No kernel version here: the userspace assets carry the pinned upstream
+      # version instead (see the header comment)
       OPENWRT_VERSION: ${{ needs.prepare.outputs.openwrt_version }}
       OPENWRT_ARCH: ${{ matrix.openwrt_arch }}
-      BUILD_DATE: ${{ matrix.build_date }}
+      DAE_VERSION: ${{ matrix.dae_version }}
       SDK_URL: ${{ matrix.sdk_url }}
       SDK_NAME: ${{ matrix.sdk_name }}
       DIST_NAME: ${{ matrix.dae_dist_name }}
@@ -664,7 +745,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: daeuniverse/dae
-          ref: main
+          ref: ${{ matrix.dae_git_tag }}
           # control/kern/headers and trace/kern/headers are submodules
           submodules: recursive
           path: dae/src
@@ -730,7 +811,7 @@ jobs:
           make defconfig
 
           # One value for the package version and the version the binary reports
-          DAE_VERSION="nightly-${BUILD_DATE}" make package/dae/compile V=s
+          DAE_VERSION="${DAE_VERSION}" make package/dae/compile V=s
 
       - name: Collect the dae package
         run: |
@@ -780,12 +861,13 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
-      # No kernel version here: these assets are named by release tag and build
-      # date (see the header comment), so only the version source matters
+      # No kernel version here: the userspace assets carry the pinned upstream
+      # version instead (see the header comment)
       OPENWRT_VERSION: ${{ needs.prepare.outputs.openwrt_version }}
       OPENWRT_ARCH: ${{ matrix.openwrt_arch }}
       KERNEL_ARCH: ${{ matrix.kernel_arch }}
-      BUILD_DATE: ${{ matrix.build_date }}
+      HONK_VERSION: ${{ matrix.honk_version }}
+      HONK_GIT_TAG: ${{ matrix.honk_git_tag }}
       SDK_URL: ${{ matrix.sdk_url }}
       SDK_NAME: ${{ matrix.sdk_name }}
       DIST_NAME: ${{ matrix.honk_dist_name }}
@@ -802,7 +884,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: daeuniverse/honk
-          ref: main
+          ref: ${{ matrix.honk_git_tag }}
+          # honk's build script derives the embedded version from the tag/git
+          # description, so the full history and the tag are needed
           fetch-depth: 0
           path: honk/src
 
@@ -920,7 +1004,8 @@ jobs:
           make defconfig
 
           # One value for the package version and the version the binary reports
-          HONK_VERSION="debug-${BUILD_DATE}" make package/honk/compile V=s
+          HONK_VERSION="${HONK_VERSION}" HONK_GIT_TAG="${HONK_GIT_TAG}" \
+            make package/honk/compile V=s
 
       - name: Collect the honk package
         run: |
@@ -961,7 +1046,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 4. Publish one GitHub Release per kernel version, collecting the assets of
-  #    every architecture that shares it (plus the userspace binaries)
+  #    every architecture that shares it (the archive and the vmlinux-btf
+  #    package, plus the userspace binaries)
   #    tag = openwrt-<openwrt_version>-<kernel_version>
   # ---------------------------------------------------------------------------
   release:
@@ -1054,6 +1140,11 @@ jobs:
               '.[] | select(.kernel_version == $kv) | "- " + .dist_name + ".tar.xz  (OpenWrt arch " + .openwrt_arch + ", " + .target + "/" + .subtarget + ")"' \
               <<< "${MATRIX_JSON}")
 
+            # The same blob as an installable package, one per architecture
+            mapfile -t btf_assets < <(jq -r --arg kv "${kernel_version}" \
+              '.[] | select(.kernel_version == $kv) | "- " + .btf_dist_name + ".apk  (OpenWrt arch " + .openwrt_arch + ")"' \
+              <<< "${MATRIX_JSON}")
+
             cat > "${RUNNER_TEMP}/release-notes.md" <<EOF
           vmlinux with embedded BTF, for CO-RE eBPF programs.
 
@@ -1064,13 +1155,18 @@ jobs:
 
           $(printf '%s\n' "${assets[@]}")
 
-          Userspace packages (dae, honk) for all OpenWrt architectures of this
-          run, when available, are attached as well. They do not depend on the
-          kernel version; their name carries the release tag (nightly for dae,
-          debug for honk) and the build date instead of it:
+          The same BTF blob is published as an installable package of this
+          OpenWrt version, one per architecture (extension .apk on 25.x,
+          .ipk on older releases):
 
-          - <openwrt_version>-dae-nightly-<openwrt_arch>-<date>.apk
-          - <openwrt_version>-honk-debug-<openwrt_arch>-<date>.apk
+          $(printf '%s\n' "${btf_assets[@]}")
+
+          Userspace packages (dae, honk) for all OpenWrt architectures of this
+          run, when available, are attached as well. They are pinned to upstream
+          releases and do not depend on the kernel version:
+
+          - <openwrt_version>-dae-2.1.1-<openwrt_arch>.apk
+          - <openwrt_version>-honk-0.0.1_beta84-<openwrt_arch>.apk
 
           These are OpenWrt packages (.apk on 25.x, .ipk on older releases),
           install them with "apk add --allow-untrusted <file>" or
@@ -1118,9 +1214,22 @@ jobs:
               fi
             done
 
+            # The vmlinux-btf package belongs to this kernel version as well;
+            # its extension is apk on 25.x and ipk on older releases
+            mapfile -t btf_names < <(jq -r --arg kv "${kernel_version}" \
+              '.[] | select(.kernel_version == $kv) | .btf_dist_name' <<< "${MATRIX_JSON}")
+
+            for name in "${btf_names[@]}"; do
+              for path in "dist/${name}".*; do
+                if [ -f "${path}" ]; then
+                  files+=("${path}")
+                fi
+              done
+            done
+
             # Userspace packages: they do not depend on the kernel version, so
             # every release published by this run carries the full set. Their
-            # names come from the matrix (release tag + build date), one package
+            # names come from the matrix (pinned upstream version), one package
             # per OpenWrt architecture; the extension is apk on 25.x and ipk on
             # older releases.
             mapfile -t userspace_names < <(jq -r '[.[] | .dae_dist_name, .honk_dist_name] | unique[]' <<< "${MATRIX_JSON}")

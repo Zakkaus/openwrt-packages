@@ -3,7 +3,9 @@
 # package Makefile, so every input arrives as an environment variable:
 #
 #   HONK_SRC            build directory holding the checked out sources
-#   HONK_VERSION        version string the binary reports (debug-<date>)
+#   HONK_VERSION        package version (0.0.1_beta84)
+#   HONK_GIT_TAG        upstream release tag the sources come from
+#                       (v0.0.1.beta.84); honk's build script embeds this
 #   HONK_ARCH_PACKAGES  arch_packages of the target, e.g. aarch64_cortex-a76
 #   OPENWRT_CC          OpenWrt cross gcc (TARGET_CROSS + gcc)
 #   OPENWRT_CXX         OpenWrt cross g++
@@ -16,6 +18,7 @@ set -eu
 cd "${HONK_SRC:?HONK_SRC is not set}"
 
 version="${HONK_VERSION:?HONK_VERSION is not set}"
+tag="${HONK_GIT_TAG:?HONK_GIT_TAG is not set}"
 cc="${OPENWRT_CC:?OPENWRT_CC is not set}"
 cxx="${OPENWRT_CXX:?OPENWRT_CXX is not set}"
 
@@ -32,7 +35,7 @@ esac
 # crates and CMake derive their own flags from the compiler wrappers below
 unset CFLAGS CPPFLAGS CXXFLAGS LDFLAGS RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
 
-echo "honk: building ${version} for ${HONK_ARCH_PACKAGES} (${target})"
+echo "honk: building ${version} from tag ${tag} for ${HONK_ARCH_PACKAGES} (${target})"
 echo "honk: C compiler ${cc}"
 echo "honk: C++ compiler ${cxx}"
 
@@ -140,7 +143,7 @@ env \
   "CARGO_TARGET_${target_upper}_LINKER=${BIN_DIR}/openwrt-cc" \
   "CARGO_TARGET_${target_upper}_RUSTFLAGS=-C link-self-contained=no -C target-feature=-crt-static" \
   "BINDGEN_EXTRA_CLANG_ARGS=${bindgen_args}" \
-  "GITHUB_REF=refs/tags/${version}" \
+  "GITHUB_REF=refs/tags/${tag}" \
   cargo build --release -p honk-core --features ebpf --target "${target}"
 
 binary="target/${target}/release/honk-core"
@@ -149,14 +152,14 @@ if [ ! -f "${binary}" ]; then
   exit 1
 fi
 
-# The version honk's build script picked up is the debug tag, not the git
+# The version honk's build script picked up is the release tag, not the git
 # fallback it uses when GITHUB_REF is not a tag ref. The binary cannot be
 # executed here (it is a musl binary for the target), so look for the string.
-if ! grep -aq "${version}" "${binary}"; then
-  echo "honk: ${binary} does not embed the expected version ${version}" >&2
+if ! grep -aq "${tag}" "${binary}"; then
+  echo "honk: ${binary} does not embed the expected version ${tag}" >&2
   exit 1
 fi
-echo "honk: ${binary} embeds version ${version}"
+echo "honk: ${binary} embeds version ${tag}"
 
 # OpenWrt runs its own musl, so the binary has to link against exactly that
 if readelf -l "${binary}" | grep -q 'program interpreter'; then
