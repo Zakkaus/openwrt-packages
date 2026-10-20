@@ -1,0 +1,9 @@
+# Upstream sources the workflow checks out into the package directories; they are
+# not part of this repository
+/dae/src/
+/honk/src/
+
+# Build outputs of the dae/honk package builds
+/dae/dist/
+/honk/dist/
+/dist/
