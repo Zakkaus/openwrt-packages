@@ -56,7 +56,9 @@ name: Build vmlinux (BTF)
 #   honk/ - package "honk": Rust, cross compiled with the OpenWrt SDK toolchain:
 #           its C/C++ dependencies (BoringSSL, SQLite) are built by the SDK
 #           gcc/g++, and it links against the musl of that SDK, so the device
-#           needs libstdcpp
+#           needs libstdcpp. The full feature set is enabled (clash-api,
+#           mimalloc, rprx, ebpf, native-ui): native-ui embeds the doona
+#           dashboard downloaded from its release, so the UI is not built here.
 # These jobs only provide the toolchains (Go release tarball, rustup's prebuilt
 # toolchains, the prebuilt bpf-linker) and then let the SDK build the packages,
 # so the assets are real OpenWrt packages (.apk on 25.x, .ipk on older releases).
@@ -73,23 +75,39 @@ name: Build vmlinux (BTF)
 # device). The vmlinux-btf package ships exactly that file, so a device can get
 # it with "apk add" instead of unpacking the archive.
 #
+# Signing: keys/public-key.pem in this repository is the public half of the key
+# the packages are signed with; the private half is the PRIVATE_KEY secret and
+# never a file in git. scripts/setup-signing-key.sh writes it back to
+# keys/private-key.pem (the path .gitignore reserves), checks it against the
+# committed public key and links it where the SDK signs with it; the SDK then
+# signs every package it builds (CONFIG_SIGN_EACH_PACKAGE), each build job
+# verifies the result against the committed public key, and the release attaches
+# public-key.pem so a device can verify the packages by copying it to
+# /etc/apk/keys/. That is what removes the need for --allow-untrusted. .ipk
+# packages (24.10 and older) carry no per-package signature - opkg verifies
+# signed package lists, not single files - so those assets are published with
+# their .sha256 only. Without the secret the packages are published unsigned
+# and a warning explains it.
+#
 # The userspace packages are pinned to upstream releases and therefore do not
 # depend on the kernel version (the versions live in the prepare job):
 #   dae  - tag v2.1.1,            package version 2.1.1
-#   honk - tag v0.0.1.beta.84,    package version 0.0.1_beta84
+#   honk - tag v0.1.0-beta.1,     package version 0.1.0_beta1
 # apk spells a pre-release with "_beta" ("~" is reserved for a commit hash), so
 # the honk tag cannot be used verbatim as the package version. The package
 # version is the version the binaries report as well: it is passed to the
 # package Makefiles as DAE_VERSION / HONK_VERSION, dae's own make receives it as
 # VERSION, and honk derives what it embeds from GITHUB_REF, so build.sh exports
-# a "refs/tags/v0.0.1.beta.84" ref for it.
+# a "refs/tags/v0.1.0-beta.1" ref for it.
 #
 # All architectures sharing the same kernel version are published together in
 # one GitHub Release with the gh CLI, tagged:
-#   openwrt-<openwrt_version>-<kernel_version>
-#   e.g. openwrt-25.12.5-6.12.94
-# The tag is checked first and only created when it does not exist yet;
-# existing assets are overwritten on re-runs.
+#   openwrt-<openwrt_version>-<kernel_version>-<date>
+#   e.g. openwrt-25.12.5-6.12.94-20261024
+# <date> is the UTC date of the run, the same for every kernel version it
+# publishes. The tag is checked first and only created when it does not exist
+# yet; existing assets are overwritten on re-runs, so a second run on the same
+# day reuses that day's release. The asset names do not carry the date.
 #
 # Note: the five builds run in parallel and take a few minutes each, mostly the
 # SDK download. Trim the target list below if your plan limits concurrent jobs.
@@ -121,6 +139,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       openwrt_version: ${{ steps.resolve.outputs.openwrt_version }}
+      release_date: ${{ steps.resolve.outputs.release_date }}
       matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - name: Resolve SDK, kernel version and matrix
@@ -146,14 +165,20 @@ jobs:
 
           # The userspace packages are pinned to upstream releases. The package
           # version is what the binaries report as well, so it is passed to the
-          # package Makefiles. honk is tagged v0.0.1.beta.84, but apk spells a
+          # package Makefiles. honk is tagged v0.1.0-beta.1, but apk spells a
           # beta pre-release with "_beta" ("~" means a commit hash), hence
-          # 0.0.1_beta84 while the sources come from the tag itself.
+          # 0.1.0_beta1 while the sources come from the tag itself.
           DAE_VERSION="2.1.1"
           DAE_GIT_TAG="v2.1.1"
-          HONK_VERSION="0.0.1_beta84"
-          HONK_GIT_TAG="v0.0.1.beta.84"
+          HONK_VERSION="0.1.0_beta1"
+          HONK_GIT_TAG="v0.1.0-beta.1"
           echo "Userspace versions: dae ${DAE_VERSION} (${DAE_GIT_TAG}), honk ${HONK_VERSION} (${HONK_GIT_TAG})"
+
+          # One UTC date for every release of this run, so all kernel versions
+          # share it even if the run crosses midnight. Release tags append it;
+          # the asset names do not.
+          RELEASE_DATE="$(date -u +%Y%m%d)"
+          echo "Release date: ${RELEASE_DATE}"
 
           : > /tmp/matrix.jsonl
           {
@@ -235,11 +260,14 @@ jobs:
 
           {
             echo ""
-            echo "Packages: vmlinux-btf \`<kernel version>\` (one per architecture), dae \`${DAE_VERSION}\` (tag \`${DAE_GIT_TAG}\`), honk \`${HONK_VERSION}\` (tag \`${HONK_GIT_TAG}\`)."
+            echo "Packages: vmlinux-btf \`<kernel version>\` (one per architecture), dae \`${DAE_VERSION}\` (tag \`${DAE_GIT_TAG}\`), honk \`${HONK_VERSION}\` (tag \`${HONK_GIT_TAG}\`, full feature set with the embedded doona UI)."
+            echo ""
+            echo "Release tags: \`openwrt-${OPENWRT_VERSION}-<kernel version>-${RELEASE_DATE}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
           {
             echo "openwrt_version=${OPENWRT_VERSION}"
+            echo "release_date=${RELEASE_DATE}"
             echo "matrix=$(jq -sc . /tmp/matrix.jsonl)"
           } >> "$GITHUB_OUTPUT"
 
@@ -413,6 +441,17 @@ jobs:
           # Also expose the OpenWrt toolchain on PATH, the same way the OpenWrt
           # buildroot does when it builds packages
           echo "${toolchain_bin}" >> "$GITHUB_PATH"
+
+      # The signing key is a repository secret and never a file in git: the
+      # script writes it to keys/private-key.pem (the path .gitignore reserves,
+      # so a local build looks the same), checks it against the committed public
+      # key and links it where the SDK signs with it (BUILD_KEY_APK_SEC). OpenWrt
+      # signs each .apk itself when CONFIG_SIGN_EACH_PACKAGE is on, which the
+      # build step below enables.
+      - name: Set up package signing
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: bash "${GITHUB_WORKSPACE}/scripts/setup-signing-key.sh"
 
       - name: Verify the OpenWrt toolchain
         run: |
@@ -621,6 +660,11 @@ jobs:
           ./scripts/feeds install -p local vmlinux-btf
 
           echo "CONFIG_PACKAGE_vmlinux-btf=m" >> .config
+          # Sign the package with the key installed above (OpenWrt's default is
+          # already y, but making it explicit here documents the intent)
+          if [ "${PACKAGE_SIGNING:-0}" = "1" ]; then
+            echo "CONFIG_SIGN_EACH_PACKAGE=y" >> .config
+          fi
           make defconfig
 
           # The kernel version is the package version, and the blob is the one
@@ -629,6 +673,30 @@ jobs:
           VMLINUX_BTF_KERNEL_RELEASE="${KERNEL_RELEASE}" \
           VMLINUX_BTF_SRC="${RUNNER_TEMP}/btf/vmlinux" \
             make package/vmlinux-btf/compile V=s
+
+      # The committed public key is the trust anchor, the same one a device
+      # uses: this fails when the package is unsigned, when the key does not
+      # match, or when the signature is broken
+      - name: Verify the package signatures
+        if: env.PACKAGE_SIGNING == '1'
+        run: |
+          set -euo pipefail
+
+          mapfile -t packages < <(find "${SDK_DIR}/bin/packages" -name '*.apk' | sort)
+          if [ "${#packages[@]}" -eq 0 ]; then
+            echo "No .apk package was produced, nothing to verify"
+            exit 0
+          fi
+
+          apk="${SDK_DIR}/staging_dir/host/bin/apk"
+          if [ ! -x "${apk}" ]; then
+            echo "::error::${apk} does not exist, the signature cannot be verified"
+            exit 1
+          fi
+
+          for package in "${packages[@]}"; do
+            "${apk}" --keys-dir "${GITHUB_WORKSPACE}/keys" verify -v "${package}"
+          done
 
       - name: Collect the vmlinux-btf package
         run: |
@@ -796,6 +864,13 @@ jobs:
           echo "SDK_DIR=${SDK_DIR}" >> "$GITHUB_ENV"
           echo "SDK directory: ${SDK_DIR}"
 
+      # Same signing set-up as in the kernel job, see
+      # scripts/setup-signing-key.sh
+      - name: Set up package signing
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: bash "${GITHUB_WORKSPACE}/scripts/setup-signing-key.sh"
+
       # The build recipe lives in dae/ (an OpenWrt package), not here: the SDK
       # compiles it and produces the apk package
       - name: Build the dae apk with the SDK
@@ -808,10 +883,34 @@ jobs:
           ./scripts/feeds install -p local dae
 
           echo "CONFIG_PACKAGE_dae=m" >> .config
+          if [ "${PACKAGE_SIGNING:-0}" = "1" ]; then
+            echo "CONFIG_SIGN_EACH_PACKAGE=y" >> .config
+          fi
           make defconfig
 
           # One value for the package version and the version the binary reports
           DAE_VERSION="${DAE_VERSION}" make package/dae/compile V=s
+
+      - name: Verify the package signatures
+        if: env.PACKAGE_SIGNING == '1'
+        run: |
+          set -euo pipefail
+
+          mapfile -t packages < <(find "${SDK_DIR}/bin/packages" -name '*.apk' | sort)
+          if [ "${#packages[@]}" -eq 0 ]; then
+            echo "No .apk package was produced, nothing to verify"
+            exit 0
+          fi
+
+          apk="${SDK_DIR}/staging_dir/host/bin/apk"
+          if [ ! -x "${apk}" ]; then
+            echo "::error::${apk} does not exist, the signature cannot be verified"
+            exit 1
+          fi
+
+          for package in "${packages[@]}"; do
+            "${apk}" --keys-dir "${GITHUB_WORKSPACE}/keys" verify -v "${package}"
+          done
 
       - name: Collect the dae package
         run: |
@@ -931,6 +1030,13 @@ jobs:
           echo "SDK_DIR=${SDK_DIR}" >> "$GITHUB_ENV"
           echo "${toolchain_bin}" >> "$GITHUB_PATH"
 
+      # Same signing set-up as in the kernel job, see
+      # scripts/setup-signing-key.sh
+      - name: Set up package signing
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: bash "${GITHUB_WORKSPACE}/scripts/setup-signing-key.sh"
+
       - name: Resolve the Rust target
         id: rust_target
         run: |
@@ -1001,11 +1107,35 @@ jobs:
           ./scripts/feeds install -p local honk
 
           echo "CONFIG_PACKAGE_honk=m" >> .config
+          if [ "${PACKAGE_SIGNING:-0}" = "1" ]; then
+            echo "CONFIG_SIGN_EACH_PACKAGE=y" >> .config
+          fi
           make defconfig
 
           # One value for the package version and the version the binary reports
           HONK_VERSION="${HONK_VERSION}" HONK_GIT_TAG="${HONK_GIT_TAG}" \
             make package/honk/compile V=s
+
+      - name: Verify the package signatures
+        if: env.PACKAGE_SIGNING == '1'
+        run: |
+          set -euo pipefail
+
+          mapfile -t packages < <(find "${SDK_DIR}/bin/packages" -name '*.apk' | sort)
+          if [ "${#packages[@]}" -eq 0 ]; then
+            echo "No .apk package was produced, nothing to verify"
+            exit 0
+          fi
+
+          apk="${SDK_DIR}/staging_dir/host/bin/apk"
+          if [ ! -x "${apk}" ]; then
+            echo "::error::${apk} does not exist, the signature cannot be verified"
+            exit 1
+          fi
+
+          for package in "${packages[@]}"; do
+            "${apk}" --keys-dir "${GITHUB_WORKSPACE}/keys" verify -v "${package}"
+          done
 
       - name: Collect the honk package
         run: |
@@ -1048,7 +1178,7 @@ jobs:
   # 4. Publish one GitHub Release per kernel version, collecting the assets of
   #    every architecture that shares it (the archive and the vmlinux-btf
   #    package, plus the userspace binaries)
-  #    tag = openwrt-<openwrt_version>-<kernel_version>
+  #    tag = openwrt-<openwrt_version>-<kernel_version>-<date>
   # ---------------------------------------------------------------------------
   release:
     name: Publish GitHub releases
@@ -1064,6 +1194,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       OPENWRT_VERSION: ${{ needs.prepare.outputs.openwrt_version }}
+      RELEASE_DATE: ${{ needs.prepare.outputs.release_date }}
       MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
     steps:
       - name: Checkout
@@ -1092,7 +1223,7 @@ jobs:
           fi
 
           for kernel_version in "${kernel_versions[@]}"; do
-            tag="openwrt-${OPENWRT_VERSION}-${kernel_version}"
+            tag="openwrt-${OPENWRT_VERSION}-${kernel_version}-${RELEASE_DATE}"
 
             release_exists=false
             if gh release view "${tag}" >/dev/null 2>&1; then
@@ -1122,6 +1253,10 @@ jobs:
           echo "Resolved $(wc -l < "${state}") release(s)"
 
       - name: Create tag and release with gh
+        env:
+          # Only a boolean, never the key itself: the note below must match what
+          # was actually published
+          SIGNING_KEY_AVAILABLE: ${{ secrets.PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
 
@@ -1145,6 +1280,24 @@ jobs:
               '.[] | select(.kernel_version == $kv) | "- " + .btf_dist_name + ".apk  (OpenWrt arch " + .openwrt_arch + ")"' \
               <<< "${MATRIX_JSON}")
 
+            # Claim only what was actually published: the secret is not enough,
+            # the assets have to be .apk files for them to be signed at all
+            if [ "${SIGNING_KEY_AVAILABLE}" = "true" ] && ls dist/*.apk > /dev/null 2>&1; then
+              apk_install="apk add <file>"
+              printf -v signing_note '%s\n' \
+                "public-key.pem, attached to this release, belongs to the key these" \
+                "packages are signed with: copy it to /etc/apk/keys/ on the device" \
+                "(the file name does not matter, apk matches the key itself) and" \
+                "\"apk add <file>\" verifies the signature. Without it apk rejects" \
+                "the packages as untrusted."
+            else
+              apk_install="apk add --allow-untrusted <file>"
+              printf -v signing_note '%s\n' \
+                "The .apk packages are not signed in this release, so apk needs" \
+                "--allow-untrusted. Compare the published .sha256 checksums" \
+                "instead."
+            fi
+
             cat > "${RUNNER_TEMP}/release-notes.md" <<EOF
           vmlinux with embedded BTF, for CO-RE eBPF programs.
 
@@ -1166,12 +1319,19 @@ jobs:
           releases and do not depend on the kernel version:
 
           - <openwrt_version>-dae-2.1.1-<openwrt_arch>.apk
-          - <openwrt_version>-honk-0.0.1_beta84-<openwrt_arch>.apk
+          - <openwrt_version>-honk-0.1.0_beta1-<openwrt_arch>.apk
+
+          Both packages install an OpenWrt procd init script and a UCI
+          configuration (/etc/config/dae, /etc/config/honk); the service is
+          disabled until "option enabled '1'" is set. honk is built with the
+          full feature set and embeds the doona UI (native-ui): configure
+          experimental.native_api with "ui: embedded" to serve it.
 
           These are OpenWrt packages (.apk on 25.x, .ipk on older releases),
-          install them with "apk add --allow-untrusted <file>" or
-          "opkg install <file>" respectively.
+          install them with "${apk_install}" or "opkg install <file>"
+          respectively.
 
+          ${signing_note}
           Every archive contains a single file named vmlinux, plus its .sha256
           checksum.
 
@@ -1241,6 +1401,13 @@ jobs:
                 fi
               done
             done
+
+            # The public key that verifies the signatures of every .apk of this
+            # release; it is also committed to the repository as
+            # keys/public-key.pem
+            if [ -f "keys/public-key.pem" ]; then
+              files+=("keys/public-key.pem")
+            fi
 
             if [ "${#files[@]}" -eq 0 ]; then
               echo "::error::No archives found in dist/ for ${tag}, did the build jobs upload their artifacts?"
