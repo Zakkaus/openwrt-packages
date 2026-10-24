@@ -873,7 +873,7 @@ jobs:
           path: dae/src
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: dae/src/go.mod
           # The package build runs in the SDK tree, so the module cache cannot be
@@ -1199,7 +1199,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
