@@ -7,3 +7,9 @@
 /dae/dist/
 /honk/dist/
 /dist/
+
+# Signing key of the package feed. The private half is the PRIVATE_KEY secret of
+# the workflow and must never be committed; the workflow restores it to this path
+# from the secret (scripts/setup-signing-key.sh), keys/public-key.pem is the
+# published half and belongs in the repository.
+/keys/private-key.pem
