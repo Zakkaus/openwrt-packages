@@ -25,6 +25,19 @@ start_service() {
 	config_get_bool enabled "config" "enabled" 0
 	[ "$enabled" -eq 1 ] || return 1
 
+	# honk creates the same dae0 link pair and daens namespace and hooks the
+	# same interfaces, so the two never run at the same time. reload turns
+	# honk off when dae is turned on; this covers a configuration edited by
+	# hand and boot. A honk that is turned off is only on its way out (it
+	# takes a moment to detach), so it does not block; should it still hold the
+	# link pair, procd restarts dae shortly after.
+	if [ "$(uci -q get honk.config.enabled)" = 1 ] &&
+		ubus call service list '{"name":"honk"}' 2>/dev/null |
+		jsonfilter -q -e '@.honk.instances[*].running' | grep -q true; then
+		logger -t dae "honk is running; dae and honk cannot run at the same time, disable honk first"
+		return 1
+	fi
+
 	local config_file
 	config_get config_file "config" "config_file" "/etc/dae/config.dae"
 
@@ -53,8 +66,33 @@ start_service() {
 }
 
 reload_service() {
-	# dae reloads on SIGHUP and keeps established connections.
-	procd_send_signal "$CONF" "$CONF" 1
+	# Also the reload trigger of /etc/config/dae. An instance that runs with the
+	# configured file only rereads it. Everything else goes through start,
+	# which procd turns into a start, a restart when the command line changed
+	# (another configuration file), or a stop when start_service adds no
+	# instance (turned off, or the other service runs). Unlike stop, that keeps
+	# the service and its triggers registered, so turning it on again works.
+	config_load "$CONF"
+
+	local enabled config_file
+	config_get_bool enabled "config" "enabled" 0
+	# Only one of dae and honk is turned on: turning dae on turns honk off,
+	# and starting honk without an instance stops it but keeps its triggers.
+	if [ "$enabled" -eq 1 ] && [ "$(uci -q get honk.config.enabled)" = 1 ]; then
+		uci set honk.config.enabled=0
+		uci commit honk
+		/etc/init.d/honk start
+	fi
+	config_get config_file "config" "config_file" "/etc/dae/config.dae"
+	if [ "$enabled" -eq 1 ] && procd_running "$CONF" "$CONF" &&
+		ubus call service list "{\"name\":\"$CONF\"}" 2>/dev/null |
+		jsonfilter -q -e "@.$CONF.instances.$CONF.command[*]" | grep -qxF -- "$config_file"; then
+		# dae reloads on SIGUSR1 (what `dae reload` sends) and keeps established
+		# connections; it ignores SIGHUP.
+		procd_send_signal "$CONF" "$CONF" USR1
+	else
+		start
+	fi
 }
 
 service_triggers() {
