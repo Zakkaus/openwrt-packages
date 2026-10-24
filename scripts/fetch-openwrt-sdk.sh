@@ -28,6 +28,8 @@ download_dir="${work_dir}/sdk-dl"
 sdk_root="${work_dir}/sdk"
 
 echo "SDK: ${sdk_name}"
+echo "Download: ${sdk_url}"
+echo "Fallback: ${sdk_fallback_url:-none}"
 
 # The checksum the publisher of that directory lists for the tarball, so a
 # broken transfer is caught before the build. Empty when the directory does not
@@ -41,6 +43,7 @@ expected_sha256() {
 try_download() {
 	url="$1"
 	echo "Downloading ${url}"
+	echo "Checksum: ${url%/*}/sha256sums"
 	rm -f "${download_dir}/${sdk_name}"
 	# No --retry-all-errors on purpose: a 404 means this host does not have the
 	# tarball and the next mirror should be tried at once, while timeouts,

@@ -321,6 +321,10 @@ the other one as fallback in the matrix; each job downloads the SDK with
 official host first, then the mirror, and verifies every download against the
 `sha256sums` published in the same directory (a mismatch or a truncated transfer
 is retried on the other host instead of failing halfway through the build).
+Nothing is downloaded from a host the log does not name: `prepare` prints each
+request and lists the SDK URL, with its fallback, of every target in the job
+summary, and the script prints the tarball, the `sha256sums` file it checked it
+against and the host the file finally came from.
 
 **build** (one job per architecture, does not depend on the other jobs) —
 downloads and extracts the SDK, then takes from it:

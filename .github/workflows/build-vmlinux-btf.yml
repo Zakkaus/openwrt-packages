@@ -39,7 +39,10 @@ name: Build vmlinux (BTF)
 # the host that serves the requested release and records the other one as the
 # fallback for the build jobs, and every job downloads the SDK through
 # scripts/fetch-openwrt-sdk.sh, which retries on the fallback and checks each
-# download against the sha256sums published in the same directory.
+# download against the sha256sums published in the same directory. Every URL
+# that is used is printed: prepare logs each request and lists the SDK URL (and
+# its fallback) of every target in the job summary, and the script prints the
+# tarball, the checksum file and the host each download finally came from.
 #
 # Targets built here, named by their OpenWrt architecture (arch_packages):
 #   x86_64             -> x86/64
@@ -197,17 +200,20 @@ jobs:
           echo "OpenWrt release tree: ${BASE} (fallback: ${FALLBACK_BASE:-none})"
 
           # Takes the file from the fallback mirror when the primary does not
-          # serve it, so a single missing file does not fail the whole matrix
+          # serve it, so a single missing file does not fail the whole matrix.
+          # Each attempt is printed, so the log names every URL that was used.
           fetch() {
             local urls=("${BASE}/$1") url
             if [ -n "${FALLBACK_BASE}" ]; then
               urls+=("${FALLBACK_BASE}/$1")
             fi
             for url in "${urls[@]}"; do
+              echo "GET ${url}" >&2
               if curl -fsSL --http1.1 --retry 2 --retry-delay 3 --connect-timeout 20 \
                 --max-time 60 "${url}"; then
                 return 0
               fi
+              echo "::warning::${url} did not return the file" >&2
             done
             return 1
           }
@@ -230,8 +236,13 @@ jobs:
           echo "Release date: ${RELEASE_DATE}"
 
           : > /tmp/matrix.jsonl
+          : > /tmp/sdk-urls.md
           {
             echo "### OpenWrt ${OPENWRT_VERSION}"
+            echo ""
+            echo "Resources: \`${BASE}\`"
+            echo ""
+            echo "Fallback mirror: \`${FALLBACK_BASE:-none}\`"
             echo ""
             echo "| OpenWrt arch | target/subtarget | kernel | SDK |"
             echo "|---|---|---|---|"
@@ -273,6 +284,24 @@ jobs:
               exit 1
             fi
 
+            # The tarball this target is built from, on both hosts when the
+            # mirror is in play, so the log and the summary name every URL
+            sdk_url="${url}/${sdk_name}"
+            sdk_fallback_url=""
+            if [ -n "${FALLBACK_BASE}" ]; then
+              sdk_fallback_url="${FALLBACK_BASE}/targets/${target}/${subtarget}/${sdk_name}"
+            fi
+            echo "SDK for ${target}/${subtarget}: ${sdk_url}"
+            if [ -n "${sdk_fallback_url}" ]; then
+              echo "SDK fallback for ${target}/${subtarget}: ${sdk_fallback_url}"
+            fi
+            {
+              echo "- \`${openwrt_arch}\` (${target}/${subtarget}): \`${sdk_url}\`"
+              if [ -n "${sdk_fallback_url}" ]; then
+                echo "  - fallback: \`${sdk_fallback_url}\`"
+              fi
+            } >> /tmp/sdk-urls.md
+
             dist_name="${OPENWRT_VERSION}-vmlinux-${openwrt_arch}-${kernel_version}"
             # The BTF package depends on the kernel, so its version (and name)
             # carries the kernel version; the userspace packages are pinned to
@@ -288,8 +317,8 @@ jobs:
               --arg subtarget "${subtarget}" \
               --arg kernel_arch "${kernel_arch}" \
               --arg kernel_version "${kernel_version}" \
-              --arg sdk_url "${url}/${sdk_name}" \
-              --arg sdk_fallback_url "${FALLBACK_BASE:+${FALLBACK_BASE}/targets/${target}/${subtarget}/${sdk_name}}" \
+              --arg sdk_url "${sdk_url}" \
+              --arg sdk_fallback_url "${sdk_fallback_url}" \
               --arg sdk_name "${sdk_name}" \
               --arg dist_name "${dist_name}" \
               --arg btf_dist_name "${btf_dist_name}" \
@@ -319,6 +348,10 @@ jobs:
             echo "Packages: vmlinux-btf \`<kernel version>\` (one per architecture), dae \`${DAE_VERSION}\` (tag \`${DAE_GIT_TAG}\`), honk \`${HONK_VERSION}\` (tag \`${HONK_GIT_TAG}\`, full feature set with the embedded doona UI)."
             echo ""
             echo "Release tags: \`openwrt-${OPENWRT_VERSION}-<kernel version>-${RELEASE_DATE}\`"
+            echo ""
+            echo "SDKs downloaded:"
+            echo ""
+            cat /tmp/sdk-urls.md
           } >> "$GITHUB_STEP_SUMMARY"
 
           {
