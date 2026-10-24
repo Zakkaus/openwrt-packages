@@ -1,8 +1,10 @@
-# vmlinux-bpf-build
+# openwrt-packages
 
 Builds a BTF-enabled `vmlinux` for OpenWrt targets and builds the `vmlinux-btf`,
 `dae` and `honk` packages for the same architectures, then publishes everything
-in a single GitHub Release per kernel version.
+in a single GitHub Release per kernel version. The same packages, plus LuCI
+apps for dae and honk, are published as a signed apk
+[package feed](#package-feed) at <https://openwrt.daeuniverse.org/>.
 
 The BTF is produced the way the OpenWrt package
 [QiuSimons/vmlinux-btf](https://github.com/QiuSimons/vmlinux-btf) does it: a few
@@ -34,10 +36,15 @@ comes from.
 ├── vmlinux-btf/  # OpenWrt package "vmlinux-btf": Makefile (prebuilt blob)
 ├── dae/          # OpenWrt package "dae":  Makefile + build.sh + files/ (init, UCI)
 ├── honk/         # OpenWrt package "honk": Makefile + build.sh + files/ (init, UCI, config)
+├── luci-lib-daeuniverse/  # the LuCI page shared by both apps, and its translations
+├── luci-app-dae/          # LuCI app for dae: menu entry, ACL, the page's settings
+├── luci-app-honk/         # LuCI app for honk: the same for honk
 ├── keys/         # public-key.pem: the key the .apk packages are signed with
 ├── scripts/      # setup-signing-key.sh: restores and checks the signing key
                   # sign-packages.sh: signs the built .apk files and verifies them
                   # fetch-openwrt-sdk.sh: downloads the SDK, official host then mirror
+                  # feed-site/: writes the landing page of the package feed
+├── docs/screenshots/  # the LuCI screenshots of this README
 └── src/          # vendored BTF stubs from QiuSimons/vmlinux-btf
 ```
 
@@ -61,7 +68,7 @@ git clone --branch v0.1.0-beta.1 https://github.com/daeuniverse/honk honk/src
 | Asset | Contents | Built from |
 |---|---|---|
 | `<openwrt_version>-vmlinux-<openwrt_arch>-<kernel_version>.tar.xz` | one file named `vmlinux`: the detached BTF blob (the same file the upstream package installs) | `src/shadow_btf_*.c` compiled against the SDK's prepared kernel headers with the SDK toolchain, then `pahole` |
-| `<openwrt_version>-vmlinux-btf-<openwrt_arch>-<kernel_version>.apk` | OpenWrt package `vmlinux-btf` (version = kernel version), installing `/usr/lib/debug/boot/vmlinux`, the `vmlinux-<kernel release>` symlink, `/usr/share/vmlinux-btf/version` and install scripts that enforce the kernel generation | the same blob, packaged with [`vmlinux-btf/Makefile`](vmlinux-btf/Makefile) |
+| `<openwrt_version>-vmlinux-btf-<openwrt_arch>-<kernel_version>.apk` | OpenWrt package `vmlinux-btf` (version = kernel version), installing `/usr/lib/debug/boot/vmlinux`, the `vmlinux-<kernel release>` symlink and `/usr/share/vmlinux-btf/version`; it only installs on the exact kernel it was built for and provides `kmod-xdp-sockets-diag` | the same blob, packaged with [`vmlinux-btf/Makefile`](vmlinux-btf/Makefile) |
 | `<openwrt_version>-dae-2.1.1-<openwrt_arch>.apk` | OpenWrt package `dae` 2.1.1, installing `/usr/bin/dae`, a procd init script and `/etc/config/dae` | [daeuniverse/dae](https://github.com/daeuniverse/dae) tag `v2.1.1`, built by [`dae/Makefile`](dae/Makefile) |
 | `<openwrt_version>-honk-0.1.0_beta1-<openwrt_arch>.apk` | OpenWrt package `honk` 0.1.0_beta1, installing `/usr/bin/honk-core` (full feature set with the embedded doona UI), a procd init script and `/etc/config/honk` | [daeuniverse/honk](https://github.com/daeuniverse/honk) tag `v0.1.0-beta.1`, built by [`honk/Makefile`](honk/Makefile) |
 | `public-key.pem` | the public key that verifies the signature of every `.apk` asset of the release | [`keys/public-key.pem`](keys/public-key.pem), see [Verifying the packages](#verifying-the-packages) |
@@ -97,11 +104,12 @@ and the embedded version come from the upstream tag `v0.1.0-beta.1` itself.
 
 | Input | Default | Meaning |
 |---|---|---|
-| `openwrt_version` | `25.12.5` | OpenWrt release to build for, e.g. `25.12.5` or `24.10.8`. The kernel version is taken from that release, not entered by hand. |
+| `openwrt_version` | `25.12.6` | OpenWrt release to build for, e.g. `25.12.6`. The kernel version is taken from that release, not entered by hand. Only apk releases (25.12 and later) build. |
+| `upload_release` | on | Publish the GitHub Releases. |
+| `upload_feed` | on | Upload the [package feed](#package-feed) to the mirror. |
 
-The kernel version comes from the chosen OpenWrt release, so `openwrt_version`
-is the only input (there is no choice between a BTF blob and a full `vmlinux`
-ELF any more).
+With both uploads off a run only builds, which tests a branch without
+publishing anything.
 
 3. The result appears under **Releases**, tagged
    `openwrt-<openwrt_version>-<kernel_version>-<date>` — for example
@@ -129,13 +137,18 @@ apk add 25.12.5-vmlinux-btf-aarch64_cortex-a76-6.12.94.apk
 ```
 
 The package records the kernel version it was built for in
-`/usr/share/vmlinux-btf/version`. Its preinst script refuses the installation
-when the running kernel belongs to a different generation (`major.minor`, so
-`6.12.94` fits `6.12.95` but not `6.13.x`); the postinst script then adds
-`/usr/lib/debug/boot/vmlinux-<running release>`, so libbpf also finds the blob on
-kernels with a different point release or vendor suffix. Both scripts skip the
-check when installing into an offline root (`IPKG_INSTROOT` is set, e.g.
-ImageBuilder), where `uname` describes the build host rather than the target.
+`/usr/share/vmlinux-btf/version` and depends on the exact `kernel` package of
+the SDK (version, vermagic and release, the way kmods are locked), so apk
+refuses it on any other kernel — another point release, another target or a
+self-built kernel — instead of installing a blob whose CO-RE relocations would
+resolve the wrong types. The symlink it ships is therefore always the one
+`uname -r` names.
+
+It also provides `kmod-xdp-sockets-diag`, which dae depends on. Official
+OpenWrt kernels have neither BTF nor that module, so there apk installs
+`vmlinux-btf` to satisfy the dependency (the provide is virtual and marked as
+the default provider). ImmortalWrt, whose kernels have both, ships a real
+package of that name, and apk takes a real package over any provider.
 
 The `dae` and `honk` assets are OpenWrt packages as well:
 
@@ -163,8 +176,8 @@ release, so take it from whichever is convenient:
 
 ```sh
 # from the newest release, or from the repository at the same tag/commit
-curl -LO https://github.com/daeuniverse/vmlinux-bpf-build/releases/latest/download/public-key.pem
-curl -LO https://raw.githubusercontent.com/daeuniverse/vmlinux-bpf-build/main/keys/public-key.pem
+curl -LO https://github.com/daeuniverse/openwrt-packages/releases/latest/download/public-key.pem
+curl -LO https://raw.githubusercontent.com/daeuniverse/openwrt-packages/main/keys/public-key.pem
 ```
 
 Copy it into the trust store and install as usual - no `--allow-untrusted`
@@ -204,13 +217,21 @@ config dae 'config'            # config honk 'config'
 The scripts follow the usual procd conventions:
 
 * `start_service` does nothing while `enabled` is `0`.
+* dae and honk are never on at the same time: both create the `dae0` link
+  pair and the `daens` namespace and hook the same interfaces. Turning one on
+  (`enabled` plus a reload, which is what LuCI's Save & Apply does) turns the
+  other off and stops it, so switching is one step. A configuration edited by
+  hand with both on starts only the first; the other refuses and logs why.
 * `dae` runs `dae validate -c <config_file>` before starting; a configuration
   that fails the rule pipeline (including missing geo assets) is logged and the
   running instance is left untouched.
-* `reload` sends `SIGHUP` to the running instance (`procd_send_signal` for dae,
-  `honk-core reload` for honk), so established connections survive a
-  configuration change. Both services respawn after a crash, and stdout/stderr
-  are forwarded to syslog (`logread`), so no log file rotation is needed.
+* `reload` follows the UCI settings: it stops a service that was turned off,
+  starts one that was turned on and restarts one whose `config_file` changed.
+  Otherwise a running dae receives `SIGUSR1` (what `dae reload` sends; dae
+  ignores `SIGHUP`) and a running honk `honk-core reload`, so established
+  connections survive a configuration change. Both services
+  respawn after a crash, and stdout/stderr are forwarded to syslog (`logread`),
+  so no log file rotation is needed.
 * The honk script mounts `bpffs` on `/sys/fs/bpf` when it is not mounted yet,
   because aya pins its maps there and OpenWrt does not mount it by itself.
 
@@ -218,16 +239,15 @@ Kernel modules are declared as package dependencies:
 
 | Package | Why |
 |---|---|
-| `kmod-sched-core`, `kmod-sched-bpf`, `kmod-veth`, `kmod-xdp-sockets-diag` | TC-bpf datapath, `dae0` veth pair and the socket/XDP diagnostics used by dae |
+| `kmod-sched-core`, `kmod-sched-bpf`, `kmod-veth`, `kmod-xdp-sockets-diag` | TC-bpf datapath, `dae0` veth pair and the socket/XDP diagnostics used by dae (on official OpenWrt, `vmlinux-btf` provides the last one) |
 | `kmod-veth`, `kmod-sched-core`, `kmod-sched-bpf` | the same TC datapath and `dae0` link pair for honk |
 | `kmod-nft-core`, `kmod-nft-queue`, `kmod-nfnetlink-queue`, `kmod-nf-conntrack` | honk's NFQUEUE staging for ambiguous LAN UDP first packets |
 
 BTF is still required by both eBPF engines; install the `vmlinux-btf` package of
 the running kernel (or another BTF blob at `/usr/lib/debug/boot/vmlinux`). honk
 0.1.0 also reads the external BTF of OpenWrt kernels when sysfs has no
-`vmlinux`. honk's real eBPF backend requires Linux 6.12 or newer, so it applies
-to the 25.x releases; 24.10 (6.6) is too old for honk, while dae still runs on
-both.
+`vmlinux`. dae needs Linux 5.17 or newer and honk's eBPF backend 6.12 or
+newer; OpenWrt 25.12 runs 6.12.
 
 ### honk's embedded UI
 
@@ -258,9 +278,88 @@ in `global.data_dir` (`/var/lib/honk` by default); on OpenWrt `/var` is a tmpfs,
 so Selector choices and subscription caches do not survive a reboot — point
 `data_dir` at persistent storage if that matters.
 
+## LuCI apps
+
+`luci-app-dae` and `luci-app-honk` add **Services → dae** and **Services →
+honk**. Both are thin settings on one shared page from `luci-lib-daeuniverse`,
+which has three tabs:
+
+* **Service status** — whether the service runs, the enabled switch and the
+  configuration file. Saving and applying hands the switch to the init script,
+  which starts or stops the service; turning one service on turns the other
+  off, as the page notes next to the switch.
+* **Configuration** — an editor with syntax highlighting for the main
+  configuration file and every file it pulls in with `include`; each tab saves
+  to its own file, and a valid configuration reloads the running service.
+* **Log** — the service's lines from `logread`.
+
+The page is built from LuCI's own widgets, so it follows every official theme,
+light or dark; only the syntax colours of the editor are its own, mid tones
+that read on both. Translations are in `luci-i18n-daeuniverse-zh-cn` and
+`-zh-tw`. Besides its app's ACL, a non-root LuCI user needs `luci-base` for the
+UCI calls.
+
+| Service status | Configuration | Log |
+|---|---|---|
+| ![Service status](docs/screenshots/luci-status.png) | ![Configuration](docs/screenshots/luci-config.png) | ![Log](docs/screenshots/luci-log.png) |
+
+The LuCI packages are architecture independent and only published in the
+package feed, not in the GitHub Releases.
+
+## Package feed
+
+<https://openwrt.daeuniverse.org/> serves every package as a signed apk
+repository, with a landing page (English, Simplified and Traditional Chinese)
+that walks through the setup. The layout:
+
+```
+<series>/packages/<openwrt_arch>/                       dae, honk, the LuCI apps
+<series>/kmods/<release>/<target>/<subtarget>/          vmlinux-btf
+public-key.pem                                          key of every packages.adb
+```
+
+`<series>` is `25.12`: one packages directory serves every point release of
+the series, on OpenWrt and on ImmortalWrt, while `vmlinux-btf` is published per
+release and target because it only installs on that exact kernel. A device adds
+the repositories with the `@daeuniverse` tag, so their packages are only
+installed when named (`apk add luci-app-dae@daeuniverse`) and never replace a
+system package of the same name — ImmortalWrt ships its own `dae` and
+`luci-app-dae`:
+
+```sh
+wget -O /etc/apk/keys/daeuniverse.pem https://openwrt.daeuniverse.org/public-key.pem
+. /etc/openwrt_release
+FEED=https://openwrt.daeuniverse.org/${DISTRIB_RELEASE%.*}
+cat > /etc/apk/repositories.d/daeuniverse.list <<EOF
+@daeuniverse $FEED/packages/$DISTRIB_ARCH/packages.adb
+@daeuniverse $FEED/kmods/$DISTRIB_RELEASE/$DISTRIB_TARGET/packages.adb
+EOF
+apk update
+apk add dae@daeuniverse luci-app-dae@daeuniverse vmlinux-btf@daeuniverse
+```
+
+(or `honk` and `luci-app-honk`). ImmortalWrt leaves out the `kmods` line and
+`vmlinux-btf`. The tag does not carry over to dependencies, so the service is
+named too: ImmortalWrt would otherwise install its own, older `dae` for
+`luci-app-dae`. On official OpenWrt `vmlinux-btf` is named because honk, unlike
+dae, does not pull it in. Supported versions:
+
+| Version | Status |
+|---|---|
+| 25.12 | Supported on OpenWrt and ImmortalWrt. |
+| 24.10 | Not supported: opkg has no repository tags, so the feed would replace packages of the same name, and ImmortalWrt 24.10 ships its own dae. |
+| 23.05 and older | Not supported: the kernel is older than the 5.17 that dae needs. |
+
+The packages are built for the [architectures](#architectures) below. On
+official OpenWrt, dae and honk also need the `vmlinux-btf` of the device's
+target, so only those five targets are supported there; ImmortalWrt only needs
+the architecture to match (for example `qualcommax` or `mediatek/mt7622` as
+`aarch64_cortex-a53`). 32-bit ARM and MIPS are not supported on either.
+
 ## Architectures
 
-One representative target/subtarget per OpenWrt architecture (`arch_packages`):
+One representative target/subtarget per OpenWrt architecture (`arch_packages`).
+32-bit ARM and MIPS are not built: dae and honk are not offered for them.
 
 | OpenWrt arch | target/subtarget | kernel arch |
 |---|---|---|
@@ -298,13 +397,20 @@ flowchart LR
   K["build (x86_64, aarch64_generic, aarch64_cortex-a53/a72/a76)<br/>SDK kernel headers + SDK toolchain<br/>stubs → DWARF → pahole → BTF blob<br/>+ vmlinux-btf package"]
   D["dae 2.1.1 (one per OpenWrt arch)<br/>Go, clang for the eBPF objects"]
   H["honk 0.1.0_beta1 (one per OpenWrt arch)<br/>Rust, full features + embedded doona UI,<br/>eBPF object + BoringSSL via the SDK gcc/g++"]
+  L["luci<br/>the LuCI apps, built once (all architectures)"]
   R["release<br/>group by kernel version,<br/>one Release per version"]
+  F["feed<br/>signed apk repositories<br/>+ landing page on the mirror"]
   P --> K
   P --> D
   P --> H
+  P --> L
   K --> R
   D --> R
   H --> R
+  K --> F
+  D --> F
+  H --> F
+  L --> F
 ```
 
 **prepare** — reads
@@ -403,6 +509,21 @@ are added to every group, since they do not belong to one kernel version.
 Creating the tag is done with `gh`, pointing it at the commit the workflow ran
 on.
 
+**luci** — builds `luci-lib-daeuniverse`, `luci-app-dae` and `luci-app-honk`
+with the x86_64 SDK and its `base` and `luci` feeds. They contain only
+JavaScript, JSON and translations, so one build serves every architecture.
+
+**feed** — runs when the repository has a mirror configured
+(`vars.MIRROR_HOST`, see the job's comment for the other variables and the
+`MIRROR_SSH_KEY` secret) and `upload_feed` is on. It stores every package as
+`<name>-<version>.apk`, the name apk fetches, writes and signs one
+`packages.adb` per directory with the SDK's apk, and uploads with rsync to an
+account restricted to the feed root: packages first, then the indexes, so a
+device never reads an index that names a missing file. A run replaces the
+packages of its series and the kmods of its release and leaves other releases
+alone. Last, it lists the indexes the mirror serves and writes the landing page
+from them with [`scripts/feed-site/generate.py`](scripts/feed-site/generate.py).
+
 **signing** — the signing key is a repository secret and never a file in git.
 [`scripts/setup-signing-key.sh`](scripts/setup-signing-key.sh) writes it back to
 `keys/private-key.pem` (the path `.gitignore` reserves, so a local build has the
@@ -463,15 +584,14 @@ job logs), the packages are pinned to the upstream releases above, and the
   The compressed UI adds a few minutes of build time per architecture.
 * **The init scripts and their UCI files** are part of the packages and the
   service is disabled by default. dae validates its configuration before
-  starting; honk mounts `bpffs` when needed; both reload with SIGHUP and respawn
-  after a crash. The kernel modules in the `DEPENDS` list are the datapath
-  requirements, not optional extras.
-* **`vmlinux-btf` is kernel-generation locked.** The preinst refuses a package
-  whose kernel generation differs from `uname -r`, so installing it for a kernel
-  that is not running (for example after upgrading the kernel package but before
-  rebooting) fails with an explicit error instead of leaving a blob whose CO-RE
-  relocations resolve the wrong types. The postinst adds the
-  `vmlinux-<uname -r>` symlink, and the installed version is readable from
+  starting; honk mounts `bpffs` when needed; both reload without dropping
+  connections, respawn after a crash and are never on at the same time. The
+  kernel modules in the `DEPENDS` list are the datapath requirements, not
+  optional extras.
+* **`vmlinux-btf` is locked to one kernel.** It depends on the exact `kernel`
+  package of the SDK it was built with, so it does not install on another
+  release, target or a self-built kernel (apk reports
+  `vmlinux-btf breaks: kernel`); the installed version is readable from
   `/usr/share/vmlinux-btf/version`.
 * **dae** is a static Go binary with no libc dependency at all, one package per
   architecture, version `2.1.1`.
@@ -498,11 +618,29 @@ job logs), the packages are pinned to the upstream releases above, and the
   packaging failure fails that architecture's job and the release is not
   published.
 
+## Changelog
+
+### Unreleased
+
+* LuCI apps for dae and honk (`luci-app-dae`, `luci-app-honk`, sharing
+  `luci-lib-daeuniverse`): service status, a configuration editor that follows
+  `include`, and the log, in English and Chinese.
+* A signed apk package feed at <https://openwrt.daeuniverse.org/> with a
+  landing page; the GitHub Releases and the feed upload can each be turned off.
+* `vmlinux-btf` is locked to the exact kernel it was built for and provides
+  `kmod-xdp-sockets-diag`, so `apk add dae` works on official OpenWrt; the
+  preinst/postinst generation check is gone.
+* dae reloads with `SIGUSR1` (it ignores `SIGHUP`, so reloads did nothing
+  before); `reload` follows the `enabled` switch and `config_file`; turning
+  dae or honk on turns the other off.
+* honk no longer stacks a new bpffs mount on every start (BusyBox has no
+  `mountpoint`).
+
 ## Licensing
 
-This repository contains the workflow, the three OpenWrt packages
-(`vmlinux-btf/`, `dae/`, `honk/`), the vendored stubs under `src/` and this
-README. The stubs are a verbatim copy of GPL-3.0-or-later code
+This repository contains the workflow, the OpenWrt packages (`vmlinux-btf/`,
+`dae/`, `honk/`, the LuCI packages), the vendored stubs under `src/`, the
+landing page generator and this README. The stubs are a verbatim copy of GPL-3.0-or-later code
 from [QiuSimons/vmlinux-btf](https://github.com/QiuSimons/vmlinux-btf), and the
 rest is derived from the projects below, so adding a `LICENSE` file (GPL-3.0) is
 recommended and effectively required for redistribution.
@@ -512,4 +650,5 @@ sources apply: the BTF describes an OpenWrt (GPL-2.0) kernel and declares
 `GPL-2.0-only`, `dae` is **AGPL-3.0** and `honk` is GPL-3.0. The `dae` and
 `honk` packages install the upstream license text, which is what GPL/AGPL
 redistribution requires; keep that file with the package if you mirror it
-elsewhere.
+elsewhere. The landing page bundles the Figtree font (SIL OFL 1.1, the licence
+is next to the font files) and Lucide icons (ISC).
