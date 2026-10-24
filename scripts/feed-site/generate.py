@@ -51,7 +51,7 @@ TEXT = {
 		'install': 'Install',
 		'key': 'Import the signing key',
 		'repos': 'Add the repositories',
-		'repos_note': 'The <code>@daeuniverse</code> tag installs a package from this feed only when it is named, so system packages of the same name stay in place.',
+		'repos_note': 'With the <code>@daeuniverse</code> tag, a package the system also has is only taken from this feed when it is named with the tag, so system packages of the same name stay in place.',
 		'add': 'Install the packages',
 		'add_note': 'Without LuCI, leave out the <code>luci-</code> packages.',
 		'start': 'Enable the service',
@@ -102,7 +102,7 @@ TEXT = {
 		'install': '安装',
 		'key': '导入签名公钥',
 		'repos': '添加软件源',
-		'repos_note': '<code>@daeuniverse</code>标签使本源的软件包只在指名时安装，不会取代系统的同名软件包。',
+		'repos_note': '<code>@daeuniverse</code>标签使系统也有的软件包只在带标签指名时才从本源安装，不会取代系统的同名软件包。',
 		'add': '安装软件包',
 		'add_note': '不使用 LuCI 时，省略<code>luci-</code>开头的软件包。',
 		'start': '启用服务',
@@ -153,7 +153,7 @@ TEXT = {
 		'install': '安裝',
 		'key': '匯入簽章公鑰',
 		'repos': '加入軟體源',
-		'repos_note': '<code>@daeuniverse</code>標籤使本源的套件只在指名時安裝，不會取代系統的同名套件。',
+		'repos_note': '<code>@daeuniverse</code>標籤使系統也有的套件只在帶標籤指名時才從本源安裝，不會取代系統的同名套件。',
 		'add': '安裝套件',
 		'add_note': '不使用 LuCI 時，省略<code>luci-</code>開頭的套件。',
 		'start': '啟用服務',
@@ -327,8 +327,9 @@ def render(lang, html_lang, t, builds, base):
 	per_app = lambda make: ''.join(code(make(app), T, f' data-app="{app}"') for app in DOCS)
 	per_os_app = lambda make: ''.join(code(make(os, app), T, f' data-os="{os}" data-app="{app}"')
 	                                  for os in ('openwrt', 'immortalwrt') for app in DOCS)
-	# The tag does not reach dependencies, so the service is named as well:
-	# ImmortalWrt has a dae of its own, which would be picked otherwise.
+	# A dependency the system also has comes from the system unless it is
+	# named with the tag, so the service is named as well: ImmortalWrt has a
+	# dae of its own, which would be picked otherwise.
 	# Official OpenWrt needs the BTF of vmlinux-btf; dae would pull it in
 	# through kmod-xdp-sockets-diag, honk would not, so it is named for both.
 	btf = {'openwrt': ' vmlinux-btf@daeuniverse', 'immortalwrt': ''}
