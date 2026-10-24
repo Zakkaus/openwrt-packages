@@ -175,6 +175,7 @@ jobs:
           # already rotated into archive.openwrt.org.
           OPENWRT_MIRRORS=(
             "https://downloads.openwrt.org"
+            "https://ftp.nluug.nl/os/Linux/distr/openwrt/"
             "https://openwrt.pixeldeck.net"
           )
 
