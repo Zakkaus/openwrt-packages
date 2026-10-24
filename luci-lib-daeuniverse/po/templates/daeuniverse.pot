@@ -5,78 +5,82 @@ msgstr "Content-Type: text/plain; charset=UTF-8"
 msgid "(new)"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:458
+#: htdocs/luci-static/resources/daeuniverse/service.js:468
 msgid "Configuration"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:441
+#: htdocs/luci-static/resources/daeuniverse/service.js:445
 msgid "Configuration file"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:382
+#: htdocs/luci-static/resources/daeuniverse/service.js:386
 msgid "Configuration is invalid, the service was not reloaded"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:461
+#: htdocs/luci-static/resources/daeuniverse/service.js:471
 msgid "Edit the configuration file and every file it includes; each tab is saved to its own file."
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:437
+#: htdocs/luci-static/resources/daeuniverse/service.js:441
 msgid "Enable"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:446
+#: htdocs/luci-static/resources/daeuniverse/service.js:456
 msgid "Log"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:412
+#: htdocs/luci-static/resources/daeuniverse/service.js:452
+msgid "Must be a .dae file in %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:416
 msgid "No log entries."
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:399
+#: htdocs/luci-static/resources/daeuniverse/service.js:403
 msgid "Not running"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:468
+#: htdocs/luci-static/resources/daeuniverse/service.js:478
 msgid "Re-read includes"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:451
+#: htdocs/luci-static/resources/daeuniverse/service.js:461
 msgid "Refresh"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:399
+#: htdocs/luci-static/resources/daeuniverse/service.js:403
 msgid "Running"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:473
+#: htdocs/luci-static/resources/daeuniverse/service.js:483
 msgid "Save files"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:374
+#: htdocs/luci-static/resources/daeuniverse/service.js:378
 msgid "Saved"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:390
+#: htdocs/luci-static/resources/daeuniverse/service.js:394
 msgid "Saved, but the service could not be reloaded: %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:387
+#: htdocs/luci-static/resources/daeuniverse/service.js:391
 msgid "Saved, the service is reloading"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:457
+#: htdocs/luci-static/resources/daeuniverse/service.js:467
 msgid "Service status"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:433
+#: htdocs/luci-static/resources/daeuniverse/service.js:437
 msgid "Status"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:365
+#: htdocs/luci-static/resources/daeuniverse/service.js:369
 msgid "Unable to save: %s"
 msgstr ""
 
-#: htdocs/luci-static/resources/daeuniverse/service.js:438
+#: htdocs/luci-static/resources/daeuniverse/service.js:442
 msgid "dae and honk cannot run at the same time; enabling %s turns %s off."
 msgstr ""
