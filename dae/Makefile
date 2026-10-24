@@ -52,9 +52,11 @@ define Package/dae
   LICENSE:=AGPL-3.0-only
   # dae is a static Go binary, so it needs no libraries at runtime. Its eBPF
   # datapath attaches TC programs to the LAN/WAN interfaces and creates a veth
-  # pair plus the daens namespace, hence the kernel modules below.
+  # pair plus the daens namespace, hence the kernel modules below. The geo
+  # packages ship the dat files dae looks up as geoip:/geosite:; this package
+  # only links them into /usr/share/dae.
   DEPENDS:=+ca-bundle +kmod-sched-core +kmod-sched-bpf +kmod-veth \
-           +kmod-xdp-sockets-diag
+           +kmod-xdp-sockets-diag +v2ray-geoip +v2ray-geosite
 endef
 
 define Package/dae/description
@@ -97,6 +99,11 @@ define Package/dae/install
 	$(INSTALL_CONF) $(PKG_DIR)/files/dae.config $(1)/etc/config/dae
 	$(INSTALL_DIR) $(1)/etc/dae
 	$(INSTALL_CONF) $(PKG_BUILD_DIR)/example.dae $(1)/etc/dae/config.dae
+	# v2ray-geoip/geosite install the files under /usr/share/v2ray. dae searches
+	# /usr/share/dae (common/assets, folder "dae"), so point it there.
+	$(INSTALL_DIR) $(1)/usr/share/dae
+	$(LN) ../v2ray/geoip.dat $(1)/usr/share/dae/geoip.dat
+	$(LN) ../v2ray/geosite.dat $(1)/usr/share/dae/geosite.dat
 endef
 
 $(eval $(call BuildPackage,dae))

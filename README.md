@@ -148,9 +148,12 @@ The packages are signed after the SDK build, so `apk` accepts them once
 `public-key.pem` is in `/etc/apk/keys/`; without the key it rejects them (see
 [Verifying the packages](#verifying-the-packages)). The
 userspace packages install `/usr/bin/dae` and `/usr/bin/honk-core`, a procd init
-script, a UCI configuration and a default configuration file. `honk` declares
-`libstdcpp` and the kernel modules its datapath needs as dependencies, so `apk`
-pulls them in automatically.
+script, a UCI configuration and a default configuration file. Both depend on
+`v2ray-geoip` and `v2ray-geosite` (from the OpenWrt packages feed) and symlink
+`/usr/share/v2ray/geoip.dat` and `geosite.dat` into `/usr/share/dae` and
+`/usr/share/honk`, which is where each program looks them up. `honk` also
+declares `libstdcpp` and the kernel modules its datapath needs, so `apk` pulls
+those in automatically.
 
 ## Verifying the packages
 

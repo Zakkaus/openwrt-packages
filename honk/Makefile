@@ -61,9 +61,11 @@ define Package/honk
   # honk-core is linked against the musl and the C++ runtime of OpenWrt. Its
   # eBPF datapath needs TC-bpf and a veth pair plus the daens namespace, and
   # its NFQUEUE staging uses nftables queue expressions over nfnetlink_queue.
+  # The geo packages ship the dat files; this package links them into
+  # /usr/share/honk, which honk searches before the dae locations.
   DEPENDS:=+libstdcpp +kmod-veth +kmod-sched-core +kmod-sched-bpf \
            +kmod-nft-core +kmod-nft-queue +kmod-nfnetlink-queue \
-           +kmod-nf-conntrack
+           +kmod-nf-conntrack +v2ray-geoip +v2ray-geosite
 endef
 
 define Package/honk/description
@@ -109,6 +111,11 @@ define Package/honk/install
 	$(INSTALL_CONF) $(PKG_DIR)/files/honk.config $(1)/etc/config/honk
 	$(INSTALL_DIR) $(1)/etc/honk
 	$(INSTALL_CONF) $(PKG_DIR)/files/config.dae $(1)/etc/honk/config.dae
+	# v2ray-geoip/geosite install the files under /usr/share/v2ray. honk's
+	# find_dat looks in /usr/share/honk before /usr/share/dae.
+	$(INSTALL_DIR) $(1)/usr/share/honk
+	$(LN) ../v2ray/geoip.dat $(1)/usr/share/honk/geoip.dat
+	$(LN) ../v2ray/geosite.dat $(1)/usr/share/honk/geosite.dat
 endef
 
 $(eval $(call BuildPackage,honk))
