@@ -63,6 +63,11 @@ git clone --recurse-submodules --branch v2.1.1 https://github.com/daeuniverse/da
 git clone --branch v0.1.0-beta.1 https://github.com/daeuniverse/honk honk/src
 ```
 
+Installing `dae` from the feed also brings in `vmlinux-btf`, the provider of
+its `kmod-xdp-sockets-diag`, and builds it along with dae. It needs the blob
+as `VMLINUX_BTF_SRC`, so pass `CONFIG_PACKAGE_vmlinux-btf=` to `make` (or
+deselect it) when building without one, as the dae and LuCI jobs do.
+
 ## What it produces
 
 | Asset | Contents | Built from |
@@ -222,9 +227,10 @@ The scripts follow the usual procd conventions:
   (`enabled` plus a reload, which is what LuCI's Save & Apply does) turns the
   other off and stops it, so switching is one step. A configuration edited by
   hand with both on starts only the first; the other refuses and logs why.
-* `dae` runs `dae validate -c <config_file>` before starting; a configuration
-  that fails the rule pipeline (including missing geo assets) is logged and the
-  running instance is left untouched.
+* `dae` runs `dae validate -c <config_file>` before every start; a
+  configuration that fails the rule pipeline (including missing geo assets) is
+  logged and dae is not started. That includes the restart for a changed
+  `config_file`, which stops the instance running the old one.
 * `reload` follows the UCI settings: it stops a service that was turned off,
   starts one that was turned on and restarts one whose `config_file` changed.
   Otherwise a running dae receives `SIGUSR1` (what `dae reload` sends; dae
@@ -285,12 +291,14 @@ honk**. Both are thin settings on one shared page from `luci-lib-daeuniverse`,
 which has three tabs:
 
 * **Service status** — whether the service runs, the enabled switch and the
-  configuration file. Saving and applying hands the switch to the init script,
-  which starts or stops the service; turning one service on turns the other
-  off, as the page notes next to the switch.
+  configuration file (a `.dae` file under `/etc/dae` or `/etc/honk`, the only
+  directories the page may read and write). Saving and applying hands the
+  switch to the init script, which starts or stops the service; turning one
+  service on turns the other off, as the page notes next to the switch.
 * **Configuration** — an editor with syntax highlighting for the main
   configuration file and every file it pulls in with `include`; each tab saves
-  to its own file, and a valid configuration reloads the running service.
+  to its own file. While the service is turned on, saving reloads it (dae
+  validates the configuration first), which also starts a stopped one.
 * **Log** — the service's lines from `logread`.
 
 The page is built from LuCI's own widgets, so it follows every official theme,
@@ -339,10 +347,11 @@ apk add dae@daeuniverse luci-app-dae@daeuniverse vmlinux-btf@daeuniverse
 ```
 
 (or `honk` and `luci-app-honk`). ImmortalWrt leaves out the `kmods` line and
-`vmlinux-btf`. The tag does not carry over to dependencies, so the service is
-named too: ImmortalWrt would otherwise install its own, older `dae` for
-`luci-app-dae`. On official OpenWrt `vmlinux-btf` is named because honk, unlike
-dae, does not pull it in. Supported versions:
+`vmlinux-btf`. A dependency the system also has comes from the system unless
+it is named with the tag, so the service is named too: ImmortalWrt would
+otherwise install its own, older `dae` for `luci-app-dae`. On official OpenWrt
+`vmlinux-btf` is named because honk, unlike dae, does not pull it in.
+Supported versions:
 
 | Version | Status |
 |---|---|
