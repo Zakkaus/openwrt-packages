@@ -121,6 +121,23 @@ name: Build vmlinux (BTF)
 # yet; existing assets are overwritten on re-runs, so a second run on the same
 # day reuses that day's release. The asset names do not carry the date.
 #
+# Package feed: when the repository has a mirror configured (the MIRROR_*
+# variables and the MIRROR_SSH_KEY secret, see the feed job), the same packages
+# plus the LuCI apps are also published as signed apk repositories, with a
+# landing page (scripts/feed-site/) that explains how to use them:
+#   <series>/packages/<openwrt_arch>/              dae, honk and the LuCI apps,
+#           shared by every release of the series (25.12) and by ImmortalWrt
+#   <series>/kmods/<openwrt_version>/<target>/<subtarget>/
+#           vmlinux-btf, which only installs on the exact kernel of that
+#           release and target
+#   public-key.pem                                 the key of every packages.adb
+#   en/ zh-cn/ zh-tw/ assets/                      the landing page
+# Releases older than the newest of a series keep their kmods directory. Only
+# apk releases are published: 24.10 uses opkg, which has no repository tags,
+# and 23.05 and older run kernels older than the 5.17 that dae needs.
+# Both outputs are optional: with upload_release and upload_feed off, a run
+# only builds, which tests a branch without publishing anything.
+#
 # Note: the five builds run in parallel and take a few minutes each, mostly the
 # SDK download. Trim the target list below if your plan limits concurrent jobs.
 #
@@ -134,6 +151,14 @@ on:
         description: "OpenWrt release version (e.g. 25.12.6)"
         required: true
         default: "25.12.6"
+      upload_release:
+        description: "Publish the GitHub releases (off: only build and upload the feed)"
+        type: boolean
+        default: true
+      upload_feed:
+        description: "Upload the package feed to the mirror (off: only build, e.g. to test a branch)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -765,6 +790,17 @@ jobs:
             exit 1
           fi
 
+          # The kernel lock and the provide are what keep the package off other
+          # kernels and let dae install on official OpenWrt; both come from the
+          # Makefile, so check that they reached the package
+          info="$("${SDK_DIR}/staging_dir/host/bin/apk" --allow-untrusted adbdump "${found[0]}")"
+          if ! grep -Eq '^ +- kernel=' <<< "${info}" ||
+             ! grep -Eq '^ +- kmod-xdp-sockets-diag$' <<< "${info}"; then
+            echo "::error::vmlinux-btf lacks its kernel dependency or the kmod-xdp-sockets-diag provide"
+            printf '%s\n' "${info}" | sed -n '1,40p'
+            exit 1
+          fi
+
           mkdir -p dist
           cp "${found[0]}" "dist/${BTF_DIST_NAME}.apk"
           ( cd dist && sha256sum "${BTF_DIST_NAME}.apk" | tee "${BTF_DIST_NAME}.apk.sha256" )
@@ -1172,7 +1208,102 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # 4. Publish one GitHub Release per kernel version, collecting the assets of
+  # 4. LuCI apps: luci-lib-daeuniverse (the page both apps share, plus its
+  #    translations), luci-app-dae and luci-app-honk. They are architecture
+  #    independent (PKGARCH all), so one SDK builds them for every feed; luci.mk
+  #    and its host tools come from the luci and base feeds of that SDK.
+  # ---------------------------------------------------------------------------
+  luci:
+    name: Build the LuCI apps
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SDK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_url }}
+      SDK_FALLBACK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_fallback_url }}
+      SDK_NAME: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_name }}
+    steps:
+      # luci.mk versions a package by the last commit that touched it, which a
+      # shallow clone would make the current commit for every package
+      - name: Checkout this repository (feed)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bzip2 perl python3 rsync unzip git ca-certificates file gawk
+
+      - name: Download and extract the OpenWrt SDK
+        run: bash "${GITHUB_WORKSPACE}/scripts/fetch-openwrt-sdk.sh"
+
+      - name: Set up package signing
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: bash "${GITHUB_WORKSPACE}/scripts/setup-signing-key.sh"
+
+      - name: Build the LuCI apks with the SDK
+        run: |
+          set -euo pipefail
+
+          cd "${SDK_DIR}"
+          # The SDK's own pins of base and luci, plus this repository
+          grep -E '^src-git (--root=package )?(base|luci) ' feeds.conf.default > feeds.conf
+          printf 'src-link local %s\n' "${GITHUB_WORKSPACE}" >> feeds.conf
+          ./scripts/feeds update base luci local
+          # luci.mk compiles the translations and minifies with the host tools of
+          # luci-base (po2lmo, jsmin), which the SDK only builds with luci-base in
+          # its package tree
+          ./scripts/feeds install -p luci luci-base
+          ./scripts/feeds install -p local luci-lib-daeuniverse luci-app-dae luci-app-honk
+
+          make defconfig
+
+          # The apps depend on dae and honk, which the SDK cannot select (see
+          # the dae job), so the symbols are passed on the command line as well.
+          # The translations are only built by default for the languages of the
+          # image, so they are selected the same way.
+          packages=(luci-lib-daeuniverse luci-app-dae luci-app-honk
+            luci-i18n-daeuniverse-zh-cn luci-i18n-daeuniverse-zh-tw)
+          config=("${packages[@]/#/CONFIG_PACKAGE_}")
+          make package/luci-lib-daeuniverse/compile \
+            package/luci-app-dae/compile package/luci-app-honk/compile V=s \
+            "${config[@]/%/=m}"
+
+          for name in "${packages[@]}"; do
+            if ! find bin/packages -path '*/local/*' -name "${name}-*.apk" | grep -q .; then
+              echo "::error::The SDK produced no ${name} .apk"
+              find bin -type f | sed -n '1,50p' || true
+              exit 1
+            fi
+          done
+
+      - name: Sign and verify the packages
+        env:
+          PACKAGE_DIR: ${{ runner.temp }}/luci-apks
+        run: |
+          set -euo pipefail
+          # Only this repository's packages: the SDK may have built LuCI's own
+          # dependencies next to them
+          mkdir -p "${PACKAGE_DIR}"
+          find "${SDK_DIR}/bin/packages" -path '*/local/*' -name '*.apk' \
+            -exec cp -t "${PACKAGE_DIR}" {} +
+          bash "${GITHUB_WORKSPACE}/scripts/sign-packages.sh"
+          ls -l "${PACKAGE_DIR}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: luci-apks
+          path: ${{ runner.temp }}/luci-apks/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # 5. Publish one GitHub Release per kernel version, collecting the assets of
   #    every architecture that shares it (the archive and the vmlinux-btf
   #    package, plus the userspace binaries)
   #    tag = openwrt-<openwrt_version>-<kernel_version>-<date>
@@ -1183,7 +1314,7 @@ jobs:
     # A partial set is not a release: any failed matrix leg (kernel, dae or
     # honk) skips publishing. `success()` is false when a needed job failed or
     # was skipped, which is what a failed matrix leg does to its siblings.
-    if: ${{ success() }}
+    if: ${{ success() && inputs.upload_release }}
     runs-on: ubuntu-latest
     # Writing to a release needs contents: write (the workflow default is read)
     permissions:
@@ -1415,3 +1546,176 @@ jobs:
                 | sed 's/^/  - /' || true
             } >> "$GITHUB_STEP_SUMMARY"
           done
+
+  # ---------------------------------------------------------------------------
+  # 6. Upload the signed package feed to the mirror
+  #
+  # apk fetches "<name>-<version>.apk" next to packages.adb, so every package is
+  # stored under that name (read from the package itself), whatever the release
+  # asset is called. Each directory gets its own packages.adb, signed with the
+  # same key as the packages. A run replaces the directories of the
+  # architectures and targets it built; other ones and other releases on the
+  # mirror are left alone, and the landing page lists everything the mirror
+  # then serves.
+  #
+  # The mirror only accepts rsync (rrsync) under its feed root. Configure:
+  #   secret   MIRROR_SSH_KEY      private key of the upload account
+  #   variable MIRROR_HOST, MIRROR_PORT, MIRROR_USER
+  #   variable MIRROR_KNOWN_HOSTS  the known_hosts line of MIRROR_HOST
+  #           ("[host]:port ssh-ed25519 ..." for a port other than 22)
+  #   variable MIRROR_URL          address of the feed on the web, used by the
+  #           landing page (default https://openwrt.daeuniverse.org)
+  # Without MIRROR_HOST (e.g. in a fork) or with upload_feed off the job is
+  # skipped.
+  # ---------------------------------------------------------------------------
+  feed:
+    name: Upload the package feed
+    needs: [prepare, build, dae, honk, luci]
+    if: ${{ success() && inputs.upload_feed && vars.MIRROR_HOST != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENWRT_VERSION: ${{ needs.prepare.outputs.openwrt_version }}
+      MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+      # runner.temp is not available at job level
+      SITE_DIR: ${{ github.workspace }}/_site
+      # Only for its apk-tools, the same that built and signed the packages
+      SDK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_url }}
+      SDK_FALLBACK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_fallback_url }}
+      SDK_NAME: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Download and extract the OpenWrt SDK
+        run: bash "${GITHUB_WORKSPACE}/scripts/fetch-openwrt-sdk.sh"
+
+      - name: Set up package signing
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: bash "${GITHUB_WORKSPACE}/scripts/setup-signing-key.sh"
+
+      - name: Lay out and index the feed
+        run: |
+          set -euo pipefail
+
+          apk="${SDK_DIR}/staging_dir/host/bin/apk"
+          # apk resolves a relative --keys-dir against the root (/), not the
+          # working directory
+          keys="${GITHUB_WORKSPACE}/keys"
+          root="${SITE_DIR}/${OPENWRT_VERSION%.*}"
+
+          place() {
+            local name version
+            read -r name version < <("${apk}" --allow-untrusted adbdump "$1" | awk '
+              /^info:/ { i = 1; next } /^[^ ]/ { i = 0 }
+              i && $1 == "name:" { n = $2 } i && $1 == "version:" { v = $2 }
+              END { print n, v }')
+            if [ -z "${name}" ] || [ -z "${version}" ]; then
+              echo "::error::Cannot read the name and version of $1"
+              exit 1
+            fi
+            install -D -m 644 "$1" "$2/${name}-${version}.apk"
+          }
+
+          while IFS=$'\t' read -r arch target subtarget btf dae honk; do
+            place "dist/${dae}.apk" "${root}/packages/${arch}"
+            place "dist/${honk}.apk" "${root}/packages/${arch}"
+            for luci in dist/luci-*.apk; do
+              place "${luci}" "${root}/packages/${arch}"
+            done
+            place "dist/${btf}.apk" "${root}/kmods/${OPENWRT_VERSION}/${target}/${subtarget}"
+          done < <(jq -r '.[] | [.openwrt_arch, .target, .subtarget, .btf_dist_name, .dae_dist_name, .honk_dist_name] | @tsv' <<< "${MATRIX_JSON}")
+
+          # mkndx checks every package against the committed public key, so an
+          # unsigned or foreign package fails here
+          while IFS= read -r dir; do
+            (
+              cd "${dir}"
+              "${apk}" --keys-dir "${keys}" mkndx --output packages.adb \
+                --description "daeuniverse ${dir#"${SITE_DIR}/"}" *.apk
+              "${apk}" --allow-untrusted adbsign --sign-key "${keys}/private-key.pem" \
+                --reset-signatures packages.adb
+              "${apk}" --keys-dir "${keys}" verify packages.adb
+            )
+          done < <(find "${root}" -name '*.apk' -printf '%h\n' | sort -u)
+
+          install -m 644 "${keys}/public-key.pem" "${SITE_DIR}/public-key.pem"
+
+          {
+            echo "### Feed ${OPENWRT_VERSION}"
+            echo ""
+            echo '```'
+            ( cd "${SITE_DIR}" && find . -type f | sort )
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up mirror access
+        env:
+          MIRROR_SSH_KEY: ${{ secrets.MIRROR_SSH_KEY }}
+          MIRROR_HOST: ${{ vars.MIRROR_HOST }}
+          MIRROR_PORT: ${{ vars.MIRROR_PORT }}
+          MIRROR_USER: ${{ vars.MIRROR_USER }}
+          MIRROR_KNOWN_HOSTS: ${{ vars.MIRROR_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MIRROR_SSH_KEY}" ] || [ -z "${MIRROR_USER}" ] || [ -z "${MIRROR_KNOWN_HOSTS}" ]; then
+            echo "::error::MIRROR_SSH_KEY, MIRROR_USER and MIRROR_KNOWN_HOSTS must be set along with MIRROR_HOST"
+            exit 1
+          fi
+
+          ssh_dir="${RUNNER_TEMP}/mirror-ssh"
+          mkdir -m 700 "${ssh_dir}"
+          printf '%s\n' "${MIRROR_SSH_KEY}" > "${ssh_dir}/key"
+          printf '%s\n' "${MIRROR_KNOWN_HOSTS}" > "${ssh_dir}/known_hosts"
+          chmod 600 "${ssh_dir}/key"
+          {
+            echo "RSYNC_RSH=ssh -i ${ssh_dir}/key -p ${MIRROR_PORT:-22} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${ssh_dir}/known_hosts"
+            echo "MIRROR_DEST=${MIRROR_USER}@${MIRROR_HOST}:"
+          } >> "$GITHUB_ENV"
+
+      # Packages first and the indexes last, so a device never reads an index
+      # that names a file the mirror does not have yet. --delay-updates swaps
+      # the index in after the packages, and packages it no longer names are
+      # deleted only after that. Each architecture and target directory is
+      # synced on its own, so a run that builds fewer targets leaves the
+      # directories of the others alone.
+      - name: Upload the packages and indexes
+        run: |
+          set -euo pipefail
+
+          series="${OPENWRT_VERSION%.*}"
+          rsync -rtv --chmod=D755,F644 --exclude=packages.adb "${SITE_DIR}/" "${MIRROR_DEST}"
+          cd "${SITE_DIR}"
+          for dir in "${series}"/packages/*/ "${series}/kmods/${OPENWRT_VERSION}"/*/*/; do
+            rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay "${dir}" "${MIRROR_DEST}${dir}"
+          done
+
+      # The page lists every release on the mirror, so it is written from the
+      # mirror's file list after the upload. Only the page directories are
+      # replaced; --delete-delay does not touch the excluded feed.
+      - name: Write and upload the landing page
+        env:
+          MIRROR_URL: ${{ vars.MIRROR_URL || 'https://openwrt.daeuniverse.org' }}
+        run: |
+          set -euo pipefail
+
+          page="${RUNNER_TEMP}/page"
+          rsync --list-only -r --include='*/' --include='packages.adb' --exclude='*' "${MIRROR_DEST}" \
+            | awk '$NF ~ /\/packages\.adb$/ { print $NF }' \
+            | python3 scripts/feed-site/generate.py "${page}" "${MIRROR_URL}"
+
+          rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay \
+            --include='/en/***' --include='/zh-cn/***' --include='/zh-tw/***' --include='/assets/***' --exclude='*' \
+            "${page}/" "${MIRROR_DEST}"
+
+      - name: Remove the mirror key
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}/mirror-ssh"
