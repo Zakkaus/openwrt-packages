@@ -130,9 +130,9 @@ on:
   workflow_dispatch:
     inputs:
       openwrt_version:
-        description: "OpenWrt release version (e.g. 25.12.5 / 24.10.8)"
+        description: "OpenWrt release version (e.g. 25.12.6)"
         required: true
-        default: "25.12.5"
+        default: "25.12.6"
 
 permissions:
   contents: read
@@ -164,7 +164,7 @@ jobs:
           OPENWRT_VERSION="${OPENWRT_VERSION#v}"
 
           if ! [[ "${OPENWRT_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Malformed OpenWrt version '${INPUT_VERSION}' - expected a release version such as 25.12.5 or 24.10.8"
+            echo "::error::Malformed OpenWrt version '${INPUT_VERSION}' - expected a release version such as 25.12.6"
             exit 1
           fi
 
@@ -175,7 +175,7 @@ jobs:
           # already rotated into archive.openwrt.org.
           OPENWRT_MIRRORS=(
             "https://downloads.openwrt.org"
-            "https://ftp.nluug.nl/os/Linux/distr/openwrt/"
+            "https://ftp.nluug.nl/os/Linux/distr/openwrt"
             "https://openwrt.pixeldeck.net"
           )
 
