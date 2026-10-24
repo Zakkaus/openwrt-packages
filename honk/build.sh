@@ -3,12 +3,17 @@
 # package Makefile, so every input arrives as an environment variable:
 #
 #   HONK_SRC            build directory holding the checked out sources
-#   HONK_VERSION        package version (0.0.1_beta84)
+#   HONK_VERSION        package version (0.1.0_beta1)
 #   HONK_GIT_TAG        upstream release tag the sources come from
-#                       (v0.0.1.beta.84); honk's build script embeds this
+#                       (v0.1.0-beta.1); honk's build script embeds this
 #   HONK_ARCH_PACKAGES  arch_packages of the target, e.g. aarch64_cortex-a76
 #   OPENWRT_CC          OpenWrt cross gcc (TARGET_CROSS + gcc)
 #   OPENWRT_CXX         OpenWrt cross g++
+#
+# The binary has the full feature set: the crate defaults (clash-api, mimalloc,
+# rprx) plus ebpf and native-ui. native-ui embeds the doona dashboard pinned in
+# .github/ci/pins.env; ci/fetch-doona.sh downloads that release archive and
+# verifies its SHA-256, so the frontend is never compiled here.
 #
 # Cargo, rustc and rustup have to be on PATH, with the toolchains pinned in
 # rust-toolchain.toml and crates/honk-ebpf/rust-toolchain.toml installed, plus
@@ -102,39 +107,32 @@ ${include_list}
 EOF
 
 # ---------------------------------------------------------------------------
-# 3. The eBPF object. It is target independent, so it is built here with the
-#    nightly toolchain pinned for the crate (needs -Zbuild-std).
+# 3. The embedded dashboard (native-ui). build.rs refuses to build without an
+#    absolute HONK_DOONA_DIR; ci/fetch-doona.sh downloads the doona release
+#    pinned in .github/ci/pins.env, verifies its SHA-256 and prints the
+#    extracted directory. The archive ships the built frontend, so nothing is
+#    compiled here.
 # ---------------------------------------------------------------------------
-ebpf_channel="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  crates/honk-ebpf/rust-toolchain.toml)"
-cargo_cmd="cargo"
-if command -v rustup >/dev/null 2>&1 && [ -n "${ebpf_channel}" ]; then
-  # Word splitting is intended: this is "cargo" or "cargo +<channel>"
-  # shellcheck disable=SC2086
-  cargo_cmd="cargo +${ebpf_channel}"
-fi
-echo "honk: building the eBPF object with ${cargo_cmd}"
-(
-  cd crates/honk-ebpf
-  # The crate's .cargo/config.toml sets --btf and the debug info; an inherited
-  # RUSTFLAGS would override it and silently produce a BTF-less object
-  $cargo_cmd build --release -Zbuild-std=core --target bpfel-unknown-none
-)
-
-ebpf_object="crates/honk-ebpf/target/bpfel-unknown-none/release/honk-ebpf"
-# aya refuses objects without BTF ("no BTF parsed for object"), so fail here
-# instead of on the device
-if ! readelf -S "${ebpf_object}" | grep -q '\.BTF'; then
-  echo "honk: ${ebpf_object} has no .BTF section" >&2
+if [ ! -f "ci/fetch-doona.sh" ]; then
+  echo "honk: ci/fetch-doona.sh is missing, native-ui cannot be built" >&2
   exit 1
 fi
+HONK_DOONA_DIR="$(bash ci/fetch-doona.sh "${HONK_SRC}/.doona")"
+export HONK_DOONA_DIR
+if [ ! -f "${HONK_DOONA_DIR}/index.html" ]; then
+  echo "honk: ${HONK_DOONA_DIR} has no index.html" >&2
+  exit 1
+fi
+echo "honk: embedding the doona UI from ${HONK_DOONA_DIR}"
 
 # ---------------------------------------------------------------------------
-# 4. honk-core. Link against the OpenWrt musl from the SDK sysroot instead of
-#    the musl bundled with Rust, so the binary matches the libc of the device.
-#    crt-static is turned off as well: the OpenWrt toolchain has no static
-#    unwind library (libgcc_eh.a), so a static libstdc++ cannot be used either
-#    and everything is linked dynamically.
+# 4. honk-core. The ebpf feature makes build.rs build the eBPF object with the
+#    nightly toolchain pinned in crates/honk-ebpf/rust-toolchain.toml and embed
+#    both it and the UI. Link against the OpenWrt musl from the SDK sysroot
+#    instead of the musl bundled with Rust, so the binary matches the libc of
+#    the device. crt-static is turned off as well: the OpenWrt toolchain has no
+#    static unwind library (libgcc_eh.a), so a static libstdc++ cannot be used
+#    either and everything is linked dynamically.
 # ---------------------------------------------------------------------------
 echo "honk: building honk-core"
 env \
@@ -144,7 +142,7 @@ env \
   "CARGO_TARGET_${target_upper}_RUSTFLAGS=-C link-self-contained=no -C target-feature=-crt-static" \
   "BINDGEN_EXTRA_CLANG_ARGS=${bindgen_args}" \
   "GITHUB_REF=refs/tags/${tag}" \
-  cargo build --release -p honk-core --features ebpf --target "${target}"
+  cargo build --release -p honk-core --features ebpf,native-ui --target "${target}"
 
 binary="target/${target}/release/honk-core"
 if [ ! -f "${binary}" ]; then
@@ -160,6 +158,15 @@ if ! grep -aq "${tag}" "${binary}"; then
   exit 1
 fi
 echo "honk: ${binary} embeds version ${tag}"
+
+# native-ui embeds the asset table with its paths, so index.html must be in the
+# binary; a build without the feature (or with an empty HONK_DOONA_DIR) has no
+# such string and would silently ship without a dashboard.
+if ! grep -aq 'index.html' "${binary}"; then
+  echo "honk: ${binary} does not contain the embedded doona UI" >&2
+  exit 1
+fi
+echo "honk: ${binary} contains the embedded doona UI"
 
 # OpenWrt runs its own musl, so the binary has to link against exactly that
 if readelf -l "${binary}" | grep -q 'program interpreter'; then

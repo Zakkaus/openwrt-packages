@@ -11,6 +11,11 @@
 # version the binary reports is passed in as DAE_VERSION (the release tag
 # without its leading "v", e.g. 2.1.1).
 #
+# The package also installs an OpenWrt procd init script (files/dae.init), its
+# UCI configuration (files/dae.config) and the upstream example.dae as the
+# initial /etc/dae/config.dae. The service is disabled by default; enable it in
+# /etc/config/dae after adapting the configuration to the device.
+#
 # This file is free software, licensed under the GNU General Public License v3
 # or later.
 
@@ -45,8 +50,11 @@ define Package/dae
   TITLE:=eBPF-based transparent proxy (CO-RE)
   URL:=https://github.com/daeuniverse/dae
   LICENSE:=AGPL-3.0-only
-  # dae is a static Go binary, it needs no libraries at runtime
-  DEPENDS:=
+  # dae is a static Go binary, so it needs no libraries at runtime. Its eBPF
+  # datapath attaches TC programs to the LAN/WAN interfaces and creates a veth
+  # pair plus the daens namespace, hence the kernel modules below.
+  DEPENDS:=+ca-bundle +kmod-sched-core +kmod-sched-bpf +kmod-veth \
+           +kmod-xdp-sockets-diag
 endef
 
 define Package/dae/description
@@ -73,11 +81,22 @@ define Build/Compile
 	sh "$(PKG_DIR)/build.sh"
 endef
 
+define Package/dae/conffiles
+/etc/config/dae
+/etc/dae/config.dae
+endef
+
 define Package/dae/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/dae $(1)/usr/bin/dae
 	$(INSTALL_DIR) $(1)/usr/share/licenses/dae
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/LICENSE $(1)/usr/share/licenses/dae/LICENSE
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) $(PKG_DIR)/files/dae.init $(1)/etc/init.d/dae
+	$(INSTALL_DIR) $(1)/etc/config
+	$(INSTALL_CONF) $(PKG_DIR)/files/dae.config $(1)/etc/config/dae
+	$(INSTALL_DIR) $(1)/etc/dae
+	$(INSTALL_CONF) $(PKG_BUILD_DIR)/example.dae $(1)/etc/dae/config.dae
 endef
 
 $(eval $(call BuildPackage,dae))
