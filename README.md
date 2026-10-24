@@ -36,6 +36,7 @@ comes from.
 ├── honk/         # OpenWrt package "honk": Makefile + build.sh + files/ (init, UCI, config)
 ├── keys/         # public-key.pem: the key the .apk packages are signed with
 ├── scripts/      # setup-signing-key.sh: restores the signing key from the secret
+                  # fetch-openwrt-sdk.sh: downloads the SDK, official host then mirror
 └── src/          # vendored BTF stubs from QiuSimons/vmlinux-btf
 ```
 
@@ -307,6 +308,19 @@ flowchart LR
 `releases/<version>/targets/<target>/<subtarget>/profiles.json` for
 `arch_packages` (validated) and `linux_kernel.version`, and finds the SDK archive
 of each target in the download index.
+
+**downloads** — every OpenWrt input comes from the official downloads server,
+`https://downloads.openwrt.org/releases/<version>/`, with
+`https://openwrt.pixeldeck.net/releases/<version>/` as a fallback mirror: the
+same release tree, so only the host differs, which makes the mirror both a
+substitute when the official host is unreachable or slow and the place that
+still serves a release the official tree has rotated into
+`archive.openwrt.org`. `prepare` records the host that serves the release and
+the other one as fallback in the matrix; each job downloads the SDK with
+[`scripts/fetch-openwrt-sdk.sh`](scripts/fetch-openwrt-sdk.sh), which tries the
+official host first, then the mirror, and verifies every download against the
+`sha256sums` published in the same directory (a mismatch or a truncated transfer
+is retried on the other host instead of failing halfway through the build).
 
 **build** (one job per architecture, does not depend on the other jobs) —
 downloads and extracts the SDK, then takes from it:

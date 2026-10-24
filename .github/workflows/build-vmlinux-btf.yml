@@ -33,6 +33,14 @@ name: Build vmlinux (BTF)
 # prebuilt modules) with the .c files stripped, which is exactly the input this
 # approach wants.
 #
+# Every OpenWrt input is downloaded from the official downloads server
+# (downloads.openwrt.org), with openwrt.pixeldeck.net as a fallback mirror: both
+# serve the same release tree, so only the host differs. The prepare job picks
+# the host that serves the requested release and records the other one as the
+# fallback for the build jobs, and every job downloads the SDK through
+# scripts/fetch-openwrt-sdk.sh, which retries on the fallback and checks each
+# download against the sha256sums published in the same directory.
+#
 # Targets built here, named by their OpenWrt architecture (arch_packages):
 #   x86_64             -> x86/64
 #   aarch64_generic    -> armsr/armv8
@@ -157,11 +165,52 @@ jobs:
             exit 1
           fi
 
-          BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}"
-          if ! curl -fsIL --http1.1 --connect-timeout 20 --max-time 60 "${BASE}/" >/dev/null; then
-            echo "::error::OpenWrt ${OPENWRT_VERSION} is not available at downloads.openwrt.org"
+          # OpenWrt resources come from the official downloads server, with
+          # openwrt.pixeldeck.net as a fallback: both serve the same release
+          # tree, so only the host differs. The fallback covers the official
+          # host being unreachable or slow, and releases the official tree has
+          # already rotated into archive.openwrt.org.
+          OPENWRT_MIRRORS=(
+            "https://downloads.openwrt.org"
+            "https://openwrt.pixeldeck.net"
+          )
+
+          BASE=""
+          FALLBACK_BASE=""
+          for mirror in "${OPENWRT_MIRRORS[@]}"; do
+            if ! curl -fsIL --http1.1 --connect-timeout 20 --max-time 60 \
+              "${mirror}/releases/${OPENWRT_VERSION}/" >/dev/null; then
+              echo "::warning::OpenWrt ${OPENWRT_VERSION} is not available at ${mirror}"
+              continue
+            fi
+            if [ -z "${BASE}" ]; then
+              BASE="${mirror}/releases/${OPENWRT_VERSION}"
+            else
+              FALLBACK_BASE="${mirror}/releases/${OPENWRT_VERSION}"
+              break
+            fi
+          done
+          if [ -z "${BASE}" ]; then
+            echo "::error::OpenWrt ${OPENWRT_VERSION} is not available at any of: ${OPENWRT_MIRRORS[*]}"
             exit 1
           fi
+          echo "OpenWrt release tree: ${BASE} (fallback: ${FALLBACK_BASE:-none})"
+
+          # Takes the file from the fallback mirror when the primary does not
+          # serve it, so a single missing file does not fail the whole matrix
+          fetch() {
+            local urls=("${BASE}/$1") url
+            if [ -n "${FALLBACK_BASE}" ]; then
+              urls+=("${FALLBACK_BASE}/$1")
+            fi
+            for url in "${urls[@]}"; do
+              if curl -fsSL --http1.1 --retry 2 --retry-delay 3 --connect-timeout 20 \
+                --max-time 60 "${url}"; then
+                return 0
+              fi
+            done
+            return 1
+          }
 
           # The userspace packages are pinned to upstream releases. The package
           # version is what the binaries report as well, so it is passed to the
@@ -198,7 +247,10 @@ jobs:
 
             url="${BASE}/targets/${target}/${subtarget}"
 
-            profiles="$(curl -fsSL --http1.1 --retry 3 --max-time 60 "${url}/profiles.json")"
+            if ! profiles="$(fetch "targets/${target}/${subtarget}/profiles.json")"; then
+              echo "::error::profiles.json of ${target}/${subtarget} is not available on any mirror"
+              exit 1
+            fi
             got_arch="$(echo "${profiles}" | jq -r '.arch_packages')"
             kernel_version="$(echo "${profiles}" | jq -r '.linux_kernel.version // empty')"
 
@@ -211,7 +263,10 @@ jobs:
               exit 1
             fi
 
-            index="$(curl -fsSL --http1.1 --retry 3 --max-time 60 "${url}/")"
+            if ! index="$(fetch "targets/${target}/${subtarget}/")"; then
+              echo "::error::The file list of ${target}/${subtarget} is not available on any mirror"
+              exit 1
+            fi
             sdk_name="$(echo "${index}" | grep -oE 'openwrt-sdk-[^"<>]*\.tar\.(zst|xz)' | head -n1)"
             if [ -z "${sdk_name}" ]; then
               echo "::error::OpenWrt ${OPENWRT_VERSION} publishes no SDK for ${target}/${subtarget}"
@@ -234,6 +289,7 @@ jobs:
               --arg kernel_arch "${kernel_arch}" \
               --arg kernel_version "${kernel_version}" \
               --arg sdk_url "${url}/${sdk_name}" \
+              --arg sdk_fallback_url "${FALLBACK_BASE:+${FALLBACK_BASE}/targets/${target}/${subtarget}/${sdk_name}}" \
               --arg sdk_name "${sdk_name}" \
               --arg dist_name "${dist_name}" \
               --arg btf_dist_name "${btf_dist_name}" \
@@ -243,7 +299,7 @@ jobs:
               --arg honk_version "${HONK_VERSION}" \
               --arg honk_git_tag "${HONK_GIT_TAG}" \
               --arg honk_dist_name "${honk_dist_name}" \
-              '{openwrt_arch:$openwrt_arch,target:$target,subtarget:$subtarget,kernel_arch:$kernel_arch,kernel_version:$kernel_version,sdk_url:$sdk_url,sdk_name:$sdk_name,dist_name:$dist_name,btf_dist_name:$btf_dist_name,dae_version:$dae_version,dae_git_tag:$dae_git_tag,dae_dist_name:$dae_dist_name,honk_version:$honk_version,honk_git_tag:$honk_git_tag,honk_dist_name:$honk_dist_name}' \
+              '{openwrt_arch:$openwrt_arch,target:$target,subtarget:$subtarget,kernel_arch:$kernel_arch,kernel_version:$kernel_version,sdk_url:$sdk_url,sdk_fallback_url:$sdk_fallback_url,sdk_name:$sdk_name,dist_name:$dist_name,btf_dist_name:$btf_dist_name,dae_version:$dae_version,dae_git_tag:$dae_git_tag,dae_dist_name:$dae_dist_name,honk_version:$honk_version,honk_git_tag:$honk_git_tag,honk_dist_name:$honk_dist_name}' \
               >> /tmp/matrix.jsonl
 
             echo "| ${openwrt_arch} | ${target}/${subtarget} | ${kernel_version} | ${sdk_name} |" >> "$GITHUB_STEP_SUMMARY"
@@ -296,6 +352,7 @@ jobs:
       KERNEL_ARCH: ${{ matrix.kernel_arch }}
       KERNEL_VERSION: ${{ matrix.kernel_version }}
       SDK_URL: ${{ matrix.sdk_url }}
+      SDK_FALLBACK_URL: ${{ matrix.sdk_fallback_url }}
       SDK_NAME: ${{ matrix.sdk_name }}
       DIST_NAME: ${{ matrix.dist_name }}
       BTF_DIST_NAME: ${{ matrix.btf_dist_name }}
@@ -330,28 +387,16 @@ jobs:
             echo "::warning::this pahole cannot write a detached BTF blob, the -J + objcopy fallback will be used"
           fi
 
+      # Official downloads server first, openwrt.pixeldeck.net as the fallback,
+      # every download checked against the publisher's sha256sums (see the
+      # script). SDK_DIR is exported for the steps below.
       - name: Download and extract the OpenWrt SDK
+        run: bash "${GITHUB_WORKSPACE}/scripts/fetch-openwrt-sdk.sh"
+
+      - name: Locate the kernel headers and the toolchain
         run: |
           set -euo pipefail
 
-          echo "SDK: ${SDK_NAME}"
-          mkdir -p "${RUNNER_TEMP}/sdk-dl" "${RUNNER_TEMP}/sdk"
-          curl -fL --http1.1 --retry 5 --retry-delay 5 --retry-all-errors \
-            -o "${RUNNER_TEMP}/sdk-dl/${SDK_NAME}" "${SDK_URL}"
-
-          case "${SDK_NAME}" in
-            *.tar.zst) opts=(--zstd) ;;
-            *.tar.xz)  opts=(-J) ;;
-            *)         opts=() ;;
-          esac
-          tar "${opts[@]}" -C "${RUNNER_TEMP}/sdk" -xf "${RUNNER_TEMP}/sdk-dl/${SDK_NAME}"
-          rm -rf "${RUNNER_TEMP}/sdk-dl"
-
-          SDK_DIR="$(find "${RUNNER_TEMP}/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
-          if [ -z "${SDK_DIR}" ]; then
-            echo "::error::Unexpected SDK layout, no openwrt-sdk-* directory found"
-            exit 1
-          fi
           echo "SDK directory: ${SDK_DIR}"
 
           # The SDK ships the target kernel tree already prepared by OpenWrt:
@@ -802,6 +847,7 @@ jobs:
       OPENWRT_ARCH: ${{ matrix.openwrt_arch }}
       DAE_VERSION: ${{ matrix.dae_version }}
       SDK_URL: ${{ matrix.sdk_url }}
+      SDK_FALLBACK_URL: ${{ matrix.sdk_fallback_url }}
       SDK_NAME: ${{ matrix.sdk_name }}
       DIST_NAME: ${{ matrix.dae_dist_name }}
     steps:
@@ -839,30 +885,11 @@ jobs:
             sudo apt-get install -y --no-install-recommends clang llvm
           fi
 
+      # Official downloads server first, openwrt.pixeldeck.net as the fallback,
+      # every download checked against the publisher's sha256sums (see the
+      # script). SDK_DIR is exported for the steps below.
       - name: Download and extract the OpenWrt SDK
-        run: |
-          set -euo pipefail
-
-          echo "SDK: ${SDK_NAME}"
-          mkdir -p "${RUNNER_TEMP}/sdk-dl" "${RUNNER_TEMP}/sdk"
-          curl -fL --http1.1 --retry 5 --retry-delay 5 --retry-all-errors \
-            -o "${RUNNER_TEMP}/sdk-dl/${SDK_NAME}" "${SDK_URL}"
-
-          case "${SDK_NAME}" in
-            *.tar.zst) opts=(--zstd) ;;
-            *.tar.xz)  opts=(-J) ;;
-            *)         opts=() ;;
-          esac
-          tar "${opts[@]}" -C "${RUNNER_TEMP}/sdk" -xf "${RUNNER_TEMP}/sdk-dl/${SDK_NAME}"
-          rm -rf "${RUNNER_TEMP}/sdk-dl"
-
-          SDK_DIR="$(find "${RUNNER_TEMP}/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
-          if [ -z "${SDK_DIR}" ]; then
-            echo "::error::Unexpected SDK layout, no openwrt-sdk-* directory found"
-            exit 1
-          fi
-          echo "SDK_DIR=${SDK_DIR}" >> "$GITHUB_ENV"
-          echo "SDK directory: ${SDK_DIR}"
+        run: bash "${GITHUB_WORKSPACE}/scripts/fetch-openwrt-sdk.sh"
 
       # Same signing set-up as in the kernel job, see
       # scripts/setup-signing-key.sh
@@ -968,6 +995,7 @@ jobs:
       HONK_VERSION: ${{ matrix.honk_version }}
       HONK_GIT_TAG: ${{ matrix.honk_git_tag }}
       SDK_URL: ${{ matrix.sdk_url }}
+      SDK_FALLBACK_URL: ${{ matrix.sdk_fallback_url }}
       SDK_NAME: ${{ matrix.sdk_name }}
       DIST_NAME: ${{ matrix.honk_dist_name }}
     defaults:
@@ -989,30 +1017,17 @@ jobs:
           fetch-depth: 0
           path: honk/src
 
+      # Official downloads server first, openwrt.pixeldeck.net as the fallback,
+      # every download checked against the publisher's sha256sums (see the
+      # script). SDK_DIR is exported for the steps below.
       - name: Download and extract the OpenWrt SDK
+        run: bash "${GITHUB_WORKSPACE}/scripts/fetch-openwrt-sdk.sh"
+
+      - name: Locate the toolchain
         run: |
           set -euo pipefail
 
-          if [ -z "${SDK_URL}" ]; then
-            echo "::error::No SDK URL for OpenWrt arch ${OPENWRT_ARCH}"
-            exit 1
-          fi
-          SDK_NAME="${SDK_URL##*/}"
-          echo "SDK: ${SDK_NAME}"
-
-          mkdir -p "${RUNNER_TEMP}/sdk-dl" "${RUNNER_TEMP}/sdk"
-          curl -fL --http1.1 --retry 5 --retry-delay 5 --retry-all-errors \
-            -o "${RUNNER_TEMP}/sdk-dl/${SDK_NAME}" "${SDK_URL}"
-
-          case "${SDK_NAME}" in
-            *.tar.zst) opts=(--zstd) ;;
-            *.tar.xz)  opts=(-J) ;;
-            *)         opts=() ;;
-          esac
-          tar "${opts[@]}" -C "${RUNNER_TEMP}/sdk" -xf "${RUNNER_TEMP}/sdk-dl/${SDK_NAME}"
-          rm -rf "${RUNNER_TEMP}/sdk-dl"
-
-          SDK_DIR="$(find "${RUNNER_TEMP}/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
+          echo "SDK directory: ${SDK_DIR}"
           cross_gcc="$(find "${SDK_DIR}"/staging_dir/toolchain-*/bin -maxdepth 1 -name '*-openwrt-linux-musl-gcc' | head -n1)"
           cross_gxx="$(find "${SDK_DIR}"/staging_dir/toolchain-*/bin -maxdepth 1 -name '*-openwrt-linux-musl-g++' | head -n1)"
 
