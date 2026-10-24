@@ -1,0 +1,82 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:304
+msgid "(new)"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:458
+msgid "Configuration"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:441
+msgid "Configuration file"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:382
+msgid "Configuration is invalid, the service was not reloaded"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:461
+msgid "Edit the configuration file and every file it includes; each tab is saved to its own file."
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:437
+msgid "Enable"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:446
+msgid "Log"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:412
+msgid "No log entries."
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:399
+msgid "Not running"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:468
+msgid "Re-read includes"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:451
+msgid "Refresh"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:399
+msgid "Running"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:473
+msgid "Save files"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:374
+msgid "Saved"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:390
+msgid "Saved, but the service could not be reloaded: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:387
+msgid "Saved, the service is reloading"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:457
+msgid "Service status"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:433
+msgid "Status"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:365
+msgid "Unable to save: %s"
+msgstr ""
+
+#: htdocs/luci-static/resources/daeuniverse/service.js:438
+msgid "dae and honk cannot run at the same time; enabling %s turns %s off."
+msgstr ""
