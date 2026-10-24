@@ -359,8 +359,12 @@ const ServiceView = view.extend({
 			return Promise.resolve();
 
 		// dae refuses configuration files that are readable by others; 0600 only
-		// applies to new files, existing ones keep their mode.
-		return Promise.all(dirty.map(f => fs.write(f.path, f.editor.textarea.value, 0o600).then(() => { f.dirty = false; })))
+		// applies to new files, existing ones keep their mode. Text typed while
+		// saving keeps the file dirty, so the reload below does not drop it.
+		return Promise.all(dirty.map(f => {
+			const text = f.editor.textarea.value;
+			return fs.write(f.path, text, 0o600).then(() => { f.dirty = f.editor.textarea.value !== text; });
+		}))
 			.then(() => this.applySaved(),
 				err => ui.addNotification(null, E('p', _('Unable to save: %s').format(err.message)), 'error'))
 			.then(() => collectFiles(this.entry, readFromDisk))
@@ -441,6 +445,12 @@ const ServiceView = view.extend({
 		o = s.option(form.Value, 'config_file', _('Configuration file'));
 		o.placeholder = defaultConfig;
 		o.rmempty = false;
+		// The page may only read and write this directory (see the ACL)
+		o.validate = (section_id, value) => {
+			const dir = dirname(defaultConfig);
+			return !value || (normalize(value) === value && value.startsWith(dir + '/') && value.endsWith('.dae')) ||
+				_('Must be a .dae file in %s').format(dir);
+		};
 
 		return m.render().then(mapNode => {
 			const logPane = E('div', { 'data-tab': 'log', 'data-tab-title': _('Log') }, [

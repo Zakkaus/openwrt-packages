@@ -27,6 +27,9 @@ msgstr "啟用"
 msgid "Log"
 msgstr "日誌"
 
+msgid "Must be a .dae file in %s"
+msgstr "必須是 %s 中的 .dae 檔案"
+
 msgid "No log entries."
 msgstr "尚無日誌。"
 
