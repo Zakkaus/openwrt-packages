@@ -4,17 +4,14 @@
 #
 # The private key is a repository secret (PRIVATE_KEY) and never a file in git.
 # This script writes it to keys/private-key.pem - the path .gitignore reserves,
-# so a local build and CI use the same layout - checks that it belongs to the
-# public key that is committed here and published with every release, and links
-# it where the SDK looks for its signing key (BUILD_KEY_APK_SEC, which OpenWrt
-# defaults to $(TOPDIR)/private-key.pem).
+# so a local build and CI use the same layout - and checks that it belongs to
+# the public key that is committed here and published with every release.
+# scripts/sign-packages.sh signs the built .apk files with it afterwards: the
+# OpenWrt 25.12 SDK packages with apk-tools 3.0.5, whose "apk mkpkg" cannot
+# sign, so the SDK is not asked to sign during the build.
 #
 # Environment:
-#   PRIVATE_KEY  the secret; when empty the packages are left unsigned
-#   SDK_DIR      the unpacked SDK that builds the packages; when empty the key
-#                is only materialised in keys/, which is useful to check a
-#                secret by hand
-#   OPENWRT_VERSION  only used in the messages
+#   PRIVATE_KEY  the secret; required, a missing key fails the build
 #   GITHUB_ENV   when set, PACKAGE_SIGNING=1 is handed to the following steps
 set -eu
 
@@ -24,8 +21,8 @@ private_key="${keys_dir}/private-key.pem"
 public_key="${keys_dir}/public-key.pem"
 
 if [ -z "${PRIVATE_KEY:-}" ]; then
-	echo "::warning::PRIVATE_KEY is not set, the packages will be published unsigned"
-	exit 0
+	echo "::error::PRIVATE_KEY is not set, refusing to build packages that cannot be signed"
+	exit 1
 fi
 
 if [ ! -f "${public_key}" ]; then
@@ -47,22 +44,6 @@ if ! openssl ec -in "${private_key}" -pubout 2>/dev/null \
 	exit 1
 fi
 echo "Signing key: keys/private-key.pem (matches keys/public-key.pem)"
-
-if [ -z "${SDK_DIR:-}" ]; then
-	echo "SDK_DIR is not set, the key is only materialised in keys/"
-	exit 0
-fi
-
-# Only apk signs individual packages. opkg (24.10 and older) verifies signed
-# package lists, and these are single files, so there is nothing to sign there.
-if ! grep -q 'CONFIG_SIGN_EACH_PACKAGE' "${SDK_DIR}/include/package-pack.mk"; then
-	echo "${OPENWRT_VERSION:-This OpenWrt version} builds .ipk packages, which carry no per-package signature"
-	rm -f "${private_key}"
-	exit 0
-fi
-
-# BUILD_KEY_APK_SEC of that tree; the symlink keeps the only copy in keys/
-ln -sf "${private_key}" "${SDK_DIR}/private-key.pem"
 
 if [ -n "${GITHUB_ENV:-}" ]; then
 	echo "PACKAGE_SIGNING=1" >> "${GITHUB_ENV}"

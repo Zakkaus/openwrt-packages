@@ -35,7 +35,8 @@ comes from.
 ├── dae/          # OpenWrt package "dae":  Makefile + build.sh + files/ (init, UCI)
 ├── honk/         # OpenWrt package "honk": Makefile + build.sh + files/ (init, UCI, config)
 ├── keys/         # public-key.pem: the key the .apk packages are signed with
-├── scripts/      # setup-signing-key.sh: restores the signing key from the secret
+├── scripts/      # setup-signing-key.sh: restores and checks the signing key
+                  # sign-packages.sh: signs the built .apk files and verifies them
                   # fetch-openwrt-sdk.sh: downloads the SDK, official host then mirror
 └── src/          # vendored BTF stubs from QiuSimons/vmlinux-btf
 ```
@@ -77,8 +78,8 @@ The `dae` and
 upstream release, so their name carries that version and not the kernel version;
 `x86_64` gets `25.12.5-dae-2.1.1-x86_64.apk` while `aarch64_cortex-a76` gets
 `25.12.5-honk-0.1.0_beta1-aarch64_cortex-a76.apk`. OpenWrt 25.x produces
-`.apk` packages; for older releases (24.10 and earlier) the same step produces
-`.ipk` and the asset keeps that extension.
+`.apk` packages. The workflow signs those packages and publishes only the
+signed `.apk` files. Older `.ipk` output is not supported and fails the build.
 
 The version also flows into the binaries: it is passed to the package Makefiles
 as `DAE_VERSION` / `HONK_VERSION`, dae's own make receives it as `VERSION`, and
@@ -125,7 +126,6 @@ creates), so the archive can be skipped entirely:
 cp public-key.pem /etc/apk/keys/
 
 apk add 25.12.5-vmlinux-btf-aarch64_cortex-a76-6.12.94.apk
-# OpenWrt 24.10 and older: opkg install 24.10.8-vmlinux-btf-aarch64_cortex-a76-6.12.94.ipk
 ```
 
 The package records the kernel version it was built for in
@@ -144,8 +144,8 @@ apk add 25.12.5-dae-2.1.1-aarch64_cortex-a76.apk
 apk add 25.12.5-honk-0.1.0_beta1-aarch64_cortex-a76.apk
 ```
 
-The packages are signed, so `apk` accepts them once `public-key.pem` is in
-`/etc/apk/keys/`; without the key it needs `--allow-untrusted` (see
+The packages are signed after the SDK build, so `apk` accepts them once
+`public-key.pem` is in `/etc/apk/keys/`; without the key it rejects them (see
 [Verifying the packages](#verifying-the-packages)). The
 userspace packages install `/usr/bin/dae` and `/usr/bin/honk-core`, a procd init
 script, a UCI configuration and a default configuration file. `honk` declares
@@ -177,9 +177,9 @@ content rather than by the name, and it tries every key it finds there, so this
 one lives next to OpenWrt's own key without replacing it. Without the key apk
 rejects the packages as untrusted.
 
-`.ipk` assets (OpenWrt 24.10 and older) are not signed per package - `opkg` has
-no such concept, it verifies signed package *lists* - so compare their `.sha256`
-checksum instead.
+The `.tar.xz` archives are not packages and are not signed. Compare their
+published `.sha256` checksums instead. The workflow does not build or publish
+`.ipk` packages.
 
 ## OpenWrt integration
 
@@ -403,12 +403,14 @@ on.
 **signing** — the signing key is a repository secret and never a file in git.
 [`scripts/setup-signing-key.sh`](scripts/setup-signing-key.sh) writes it back to
 `keys/private-key.pem` (the path `.gitignore` reserves, so a local build has the
-same layout), checks it against [`keys/public-key.pem`](keys/public-key.pem) and
-links it where the SDK signs with it; each build job signs its package
-(OpenWrt's `CONFIG_SIGN_EACH_PACKAGE`) and verifies the result before the
-upload, so a package that does not verify against the published key cannot
-reach a release. See [Verifying the packages](#verifying-the-packages) for what
-a device needs.
+same layout) and checks it against [`keys/public-key.pem`](keys/public-key.pem).
+The OpenWrt 25.12 SDK uses apk-tools 3.0.5, whose `apk mkpkg` cannot sign, so
+[`scripts/sign-packages.sh`](scripts/sign-packages.sh) signs every built `.apk`
+afterwards with `apk --allow-untrusted adbsign --sign-key` and verifies it
+before the upload. A
+missing key, a mismatched key, or a package that does not verify fails the job,
+so it cannot reach a release. See [Verifying the packages](#verifying-the-packages)
+for what a device needs.
 
 ## Provenance
 
@@ -448,7 +450,7 @@ job logs), the packages are pinned to the upstream releases above, and the
   prefers `--btf_encode_detached` and falls back to `-J` + `objcopy` when the
   installed pahole is too old for it.
 * **honk** is linked dynamically against the SDK's musl, so the package depends
-  on `libstdcpp` and `apk`/`opkg` pull it in. The build fails if the binary asks
+  on `libstdcpp` and `apk` pulls it in. The build fails if the binary asks
   for a GLIBC loader, for `libsystemd` or for any shared library besides libc,
   libgcc_s and libstdc++. If the Rust LTO link ever trips the linker plugin of
   GNU `ld`, set `CARGO_PROFILE_RELEASE_LTO=false` for that build. It is built
@@ -475,13 +477,14 @@ job logs), the packages are pinned to the upstream releases above, and the
   fixed until the versions in the prepare job are bumped. The tag/release they
   are attached to is still the kernel based
   `openwrt-<version>-<kernel_version>-<date>`.
-* **The `.apk` packages are signed** with the key that [`keys/public-key.pem`](keys/public-key.pem)
-  publishes, and the runs refuse a package whose signature does not verify
-  against it, so a device needs only that file in `/etc/apk/keys/` (see
-  [Verifying the packages](#verifying-the-packages)). The signature covers the
-  package, not the `.tar.xz` archive next to it: those are published with their
-  `.sha256` checksum. `.ipk` assets (24.10 and older) are not signed per package
-  because `opkg` has no such concept.
+* **The `.apk` packages are signed after the SDK build** with the key that
+  [`keys/public-key.pem`](keys/public-key.pem) publishes. OpenWrt 25.12 cannot
+  sign them while packaging, so the workflow uses the SDK's `apk adbsign` and
+  refuses a package whose signature does not verify. A device needs only that
+  file in `/etc/apk/keys/` (see [Verifying the packages](#verifying-the-packages)).
+  The signature covers the package, not the `.tar.xz` archive next to it: those
+  are published with their `.sha256` checksum. `.ipk` packages are not built or
+  published.
 * **Time and cost.** Each of the five BTF jobs takes a few minutes, and each dae
   and honk job downloads the ~250 MB SDK plus its language toolchain. They all
   run in parallel, so on plans with a low limit of concurrent jobs the runs will

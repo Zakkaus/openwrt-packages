@@ -72,7 +72,8 @@ name: Build vmlinux (BTF)
 #           dashboard downloaded from its release, so the UI is not built here.
 # These jobs only provide the toolchains (Go release tarball, rustup's prebuilt
 # toolchains, the prebuilt bpf-linker) and then let the SDK build the packages,
-# so the assets are real OpenWrt packages (.apk on 25.x, .ipk on older releases).
+# so the assets are real OpenWrt .apk packages. Older .ipk output is not
+# supported: it cannot be signed and is not published.
 #
 # Naming of the assets:
 #   <openwrt_version>-vmlinux-<openwrt_arch>-<kernel_version>.tar.xz
@@ -90,15 +91,15 @@ name: Build vmlinux (BTF)
 # the packages are signed with; the private half is the PRIVATE_KEY secret and
 # never a file in git. scripts/setup-signing-key.sh writes it back to
 # keys/private-key.pem (the path .gitignore reserves), checks it against the
-# committed public key and links it where the SDK signs with it; the SDK then
-# signs every package it builds (CONFIG_SIGN_EACH_PACKAGE), each build job
-# verifies the result against the committed public key, and the release attaches
-# public-key.pem so a device can verify the packages by copying it to
-# /etc/apk/keys/. That is what removes the need for --allow-untrusted. .ipk
-# packages (24.10 and older) carry no per-package signature - opkg verifies
-# signed package lists, not single files - so those assets are published with
-# their .sha256 only. Without the secret the packages are published unsigned
-# and a warning explains it.
+# committed public key. The OpenWrt 25.12 SDK packages with apk-tools 3.0.5,
+# whose "apk mkpkg" has no --sign option, so scripts/sign-packages.sh signs
+# every built .apk afterwards with "apk --allow-untrusted adbsign --sign-key"
+# and verifies it
+# against the committed public key before the artifact is uploaded. The release
+# attaches public-key.pem so a device can verify the packages by copying it to
+# /etc/apk/keys/. That is what removes the need for --allow-untrusted. A
+# missing or mismatched secret fails the build. An .ipk is not a supported
+# package format and fails the build as well.
 #
 # The userspace packages are pinned to upstream releases and therefore do not
 # depend on the kernel version (the versions live in the prepare job):
@@ -523,10 +524,9 @@ jobs:
 
       # The signing key is a repository secret and never a file in git: the
       # script writes it to keys/private-key.pem (the path .gitignore reserves,
-      # so a local build looks the same), checks it against the committed public
-      # key and links it where the SDK signs with it (BUILD_KEY_APK_SEC). OpenWrt
-      # signs each .apk itself when CONFIG_SIGN_EACH_PACKAGE is on, which the
-      # build step below enables.
+      # so a local build looks the same) and checks it against the committed
+      # public key. The SDK's mkpkg cannot sign, so the package is signed after
+      # the build.
       - name: Set up package signing
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -728,7 +728,7 @@ jobs:
           file "${OUT}/vmlinux" || true
 
       # The same blob is also an installable package: the repository root is the
-      # feed, so the SDK turns vmlinux-btf/ into an apk (ipk on older releases)
+      # feed, so the SDK turns vmlinux-btf/ into an apk
       - name: Build the vmlinux-btf package with the SDK
         run: |
           set -euo pipefail
@@ -739,11 +739,6 @@ jobs:
           ./scripts/feeds install -p local vmlinux-btf
 
           echo "CONFIG_PACKAGE_vmlinux-btf=m" >> .config
-          # Sign the package with the key installed above (OpenWrt's default is
-          # already y, but making it explicit here documents the intent)
-          if [ "${PACKAGE_SIGNING:-0}" = "1" ]; then
-            echo "CONFIG_SIGN_EACH_PACKAGE=y" >> .config
-          fi
           make defconfig
 
           # The kernel version is the package version, and the blob is the one
@@ -753,47 +748,26 @@ jobs:
           VMLINUX_BTF_SRC="${RUNNER_TEMP}/btf/vmlinux" \
             make package/vmlinux-btf/compile V=s
 
-      # The committed public key is the trust anchor, the same one a device
-      # uses: this fails when the package is unsigned, when the key does not
-      # match, or when the signature is broken
-      - name: Verify the package signatures
-        if: env.PACKAGE_SIGNING == '1'
-        run: |
-          set -euo pipefail
-
-          mapfile -t packages < <(find "${SDK_DIR}/bin/packages" -name '*.apk' | sort)
-          if [ "${#packages[@]}" -eq 0 ]; then
-            echo "No .apk package was produced, nothing to verify"
-            exit 0
-          fi
-
-          apk="${SDK_DIR}/staging_dir/host/bin/apk"
-          if [ ! -x "${apk}" ]; then
-            echo "::error::${apk} does not exist, the signature cannot be verified"
-            exit 1
-          fi
-
-          for package in "${packages[@]}"; do
-            "${apk}" --keys-dir "${GITHUB_WORKSPACE}/keys" verify -v "${package}"
-          done
+      # apk-tools 3.0.5 leaves the package unsigned. Sign that exact file and
+      # reject it unless the committed public key verifies it.
+      - name: Sign and verify the package
+        run: bash "${GITHUB_WORKSPACE}/scripts/sign-packages.sh"
 
       - name: Collect the vmlinux-btf package
         run: |
           set -euo pipefail
 
           mapfile -t found < <(find "${SDK_DIR}/bin/packages" \
-            \( -name 'vmlinux-btf-*.apk' -o -name 'vmlinux-btf_*.ipk' \) | sort)
+            -name 'vmlinux-btf-*.apk' | sort)
           if [ "${#found[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one vmlinux-btf package, found ${#found[@]}"
+            echo "::error::Expected exactly one vmlinux-btf .apk, found ${#found[@]}"
             find "${SDK_DIR}/bin" -type f | sed -n '1,50p' || true
             exit 1
           fi
 
-          # OpenWrt 25.x publishes apk, older releases ipk
-          ext="${found[0]##*.}"
           mkdir -p dist
-          cp "${found[0]}" "dist/${BTF_DIST_NAME}.${ext}"
-          ( cd dist && sha256sum "${BTF_DIST_NAME}.${ext}" | tee "${BTF_DIST_NAME}.${ext}.sha256" )
+          cp "${found[0]}" "dist/${BTF_DIST_NAME}.apk"
+          ( cd dist && sha256sum "${BTF_DIST_NAME}.apk" | tee "${BTF_DIST_NAME}.apk.sha256" )
 
           {
             echo "### ${BTF_DIST_NAME}"
@@ -802,7 +776,7 @@ jobs:
             echo "- Version: \`${KERNEL_VERSION}\` (kernel version)"
             echo "- Kernel release: \`${KERNEL_RELEASE}\`"
             echo "- OpenWrt arch: \`${OPENWRT_ARCH}\`"
-            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${BTF_DIST_NAME}.${ext}.sha256")\`"
+            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${BTF_DIST_NAME}.apk.sha256")\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Package ${{ matrix.dist_name }}.tar.xz
@@ -943,9 +917,6 @@ jobs:
           ./scripts/feeds update local
           ./scripts/feeds install -p local dae
 
-          if [ "${PACKAGE_SIGNING:-0}" = "1" ]; then
-            echo "CONFIG_SIGN_EACH_PACKAGE=y" >> .config
-          fi
           make defconfig
 
           # CONFIG_PACKAGE_dae cannot be selected in the SDK: dae depends on
@@ -965,51 +936,31 @@ jobs:
           # a missing apk used to reach the collect step as if the build had
           # worked: fail here instead
           mapfile -t built < <(find "${SDK_DIR}/bin/packages" \
-            \( -name 'dae-*.apk' -o -name 'dae_*.ipk' \) 2>/dev/null)
+            -name 'dae-*.apk' 2>/dev/null)
           if [ "${#built[@]}" -ne 1 ]; then
-            echo "::error::The SDK produced ${#built[@]} dae packages, expected one"
+            echo "::error::The SDK produced ${#built[@]} dae .apk packages, expected one"
             find "${SDK_DIR}/bin" -type f | sed -n '1,50p' || true
             exit 1
           fi
 
-      - name: Verify the package signatures
-        if: env.PACKAGE_SIGNING == '1'
-        run: |
-          set -euo pipefail
-
-          mapfile -t packages < <(find "${SDK_DIR}/bin/packages" -name '*.apk' | sort)
-          if [ "${#packages[@]}" -eq 0 ]; then
-            echo "No .apk package was produced, nothing to verify"
-            exit 0
-          fi
-
-          apk="${SDK_DIR}/staging_dir/host/bin/apk"
-          if [ ! -x "${apk}" ]; then
-            echo "::error::${apk} does not exist, the signature cannot be verified"
-            exit 1
-          fi
-
-          for package in "${packages[@]}"; do
-            "${apk}" --keys-dir "${GITHUB_WORKSPACE}/keys" verify -v "${package}"
-          done
+      - name: Sign and verify the package
+        run: bash "${GITHUB_WORKSPACE}/scripts/sign-packages.sh"
 
       - name: Collect the dae package
         run: |
           set -euo pipefail
 
           mapfile -t found < <(find "${SDK_DIR}/bin/packages" \
-            \( -name 'dae-*.apk' -o -name 'dae_*.ipk' \) | sort)
+            -name 'dae-*.apk' | sort)
           if [ "${#found[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one dae package, found ${#found[@]}"
+            echo "::error::Expected exactly one dae .apk, found ${#found[@]}"
             find "${SDK_DIR}/bin" -type f | sed -n '1,50p' || true
             exit 1
           fi
 
-          # OpenWrt 25.x publishes apk, older releases ipk
-          ext="${found[0]##*.}"
           mkdir -p dist
-          cp "${found[0]}" "dist/${DIST_NAME}.${ext}"
-          ( cd dist && sha256sum "${DIST_NAME}.${ext}" | tee "${DIST_NAME}.${ext}.sha256" )
+          cp "${found[0]}" "dist/${DIST_NAME}.apk"
+          ( cd dist && sha256sum "${DIST_NAME}.apk" | tee "${DIST_NAME}.apk.sha256" )
 
           {
             echo "### ${DIST_NAME}"
@@ -1017,7 +968,7 @@ jobs:
             echo "- Package: \`$(basename "${found[0]}")\`"
             echo "- OpenWrt version: \`${OPENWRT_VERSION}\`"
             echo "- OpenWrt arch: \`${OPENWRT_ARCH}\`"
-            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${DIST_NAME}.${ext}.sha256")\`"
+            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${DIST_NAME}.apk.sha256")\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
@@ -1176,35 +1127,14 @@ jobs:
           ./scripts/feeds install -p local honk
 
           echo "CONFIG_PACKAGE_honk=m" >> .config
-          if [ "${PACKAGE_SIGNING:-0}" = "1" ]; then
-            echo "CONFIG_SIGN_EACH_PACKAGE=y" >> .config
-          fi
           make defconfig
 
           # One value for the package version and the version the binary reports
           HONK_VERSION="${HONK_VERSION}" HONK_GIT_TAG="${HONK_GIT_TAG}" \
             make package/honk/compile V=s
 
-      - name: Verify the package signatures
-        if: env.PACKAGE_SIGNING == '1'
-        run: |
-          set -euo pipefail
-
-          mapfile -t packages < <(find "${SDK_DIR}/bin/packages" -name '*.apk' | sort)
-          if [ "${#packages[@]}" -eq 0 ]; then
-            echo "No .apk package was produced, nothing to verify"
-            exit 0
-          fi
-
-          apk="${SDK_DIR}/staging_dir/host/bin/apk"
-          if [ ! -x "${apk}" ]; then
-            echo "::error::${apk} does not exist, the signature cannot be verified"
-            exit 1
-          fi
-
-          for package in "${packages[@]}"; do
-            "${apk}" --keys-dir "${GITHUB_WORKSPACE}/keys" verify -v "${package}"
-          done
+      - name: Sign and verify the package
+        run: bash "${GITHUB_WORKSPACE}/scripts/sign-packages.sh"
 
       - name: Collect the honk package
         run: |
@@ -1212,18 +1142,16 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
 
           mapfile -t found < <(find "${SDK_DIR}/bin/packages" \
-            \( -name 'honk-*.apk' -o -name 'honk_*.ipk' \) | sort)
+            -name 'honk-*.apk' | sort)
           if [ "${#found[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one honk package, found ${#found[@]}"
+            echo "::error::Expected exactly one honk .apk, found ${#found[@]}"
             find "${SDK_DIR}/bin" -type f | sed -n '1,50p' || true
             exit 1
           fi
 
-          # OpenWrt 25.x publishes apk, older releases ipk
-          ext="${found[0]##*.}"
           mkdir -p dist
-          cp "${found[0]}" "dist/${DIST_NAME}.${ext}"
-          ( cd dist && sha256sum "${DIST_NAME}.${ext}" | tee "${DIST_NAME}.${ext}.sha256" )
+          cp "${found[0]}" "dist/${DIST_NAME}.apk"
+          ( cd dist && sha256sum "${DIST_NAME}.apk" | tee "${DIST_NAME}.apk.sha256" )
 
           {
             echo "### ${DIST_NAME}"
@@ -1231,7 +1159,7 @@ jobs:
             echo "- Package: \`$(basename "${found[0]}")\`"
             echo "- OpenWrt version: \`${OPENWRT_VERSION}\`"
             echo "- OpenWrt arch: \`${OPENWRT_ARCH}\`"
-            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${DIST_NAME}.${ext}.sha256")\`"
+            echo "- SHA256: \`$(cut -d' ' -f1 "dist/${DIST_NAME}.apk.sha256")\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
@@ -1320,10 +1248,6 @@ jobs:
           echo "Resolved $(wc -l < "${state}") release(s)"
 
       - name: Create tag and release with gh
-        env:
-          # Only a boolean, never the key itself: the note below must match what
-          # was actually published
-          SIGNING_KEY_AVAILABLE: ${{ secrets.PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
 
@@ -1347,23 +1271,15 @@ jobs:
               '.[] | select(.kernel_version == $kv) | "- " + .btf_dist_name + ".apk  (OpenWrt arch " + .openwrt_arch + ")"' \
               <<< "${MATRIX_JSON}")
 
-            # Claim only what was actually published: the secret is not enough,
-            # the assets have to be .apk files for them to be signed at all
-            if [ "${SIGNING_KEY_AVAILABLE}" = "true" ] && ls dist/*.apk > /dev/null 2>&1; then
-              apk_install="apk add <file>"
-              printf -v signing_note '%s\n' \
-                "public-key.pem, attached to this release, belongs to the key these" \
-                "packages are signed with: copy it to /etc/apk/keys/ on the device" \
-                "(the file name does not matter, apk matches the key itself) and" \
-                "\"apk add <file>\" verifies the signature. Without it apk rejects" \
-                "the packages as untrusted."
-            else
-              apk_install="apk add --allow-untrusted <file>"
-              printf -v signing_note '%s\n' \
-                "The .apk packages are not signed in this release, so apk needs" \
-                "--allow-untrusted. Compare the published .sha256 checksums" \
-                "instead."
-            fi
+            # Every build job signs its .apk and fails otherwise, so a release
+            # that reaches this step has no unsigned package to explain
+            apk_install="apk add <file>"
+            printf -v signing_note '%s\n' \
+              "public-key.pem, attached to this release, belongs to the key these" \
+              "packages are signed with: copy it to /etc/apk/keys/ on the device" \
+              "(the file name does not matter, apk matches the key itself) and" \
+              "\"apk add <file>\" verifies the signature. Without it apk rejects" \
+              "the packages as untrusted."
 
             cat > "${RUNNER_TEMP}/release-notes.md" <<EOF
           vmlinux with embedded BTF, for CO-RE eBPF programs.
@@ -1376,8 +1292,7 @@ jobs:
           $(printf '%s\n' "${assets[@]}")
 
           The same BTF blob is published as an installable package of this
-          OpenWrt version, one per architecture (extension .apk on 25.x,
-          .ipk on older releases):
+          OpenWrt version, one signed .apk per architecture:
 
           $(printf '%s\n' "${btf_assets[@]}")
 
@@ -1394,9 +1309,8 @@ jobs:
           full feature set and embeds the doona UI (native-ui): configure
           experimental.native_api with "ui: embedded" to serve it.
 
-          These are OpenWrt packages (.apk on 25.x, .ipk on older releases),
-          install them with "${apk_install}" or "opkg install <file>"
-          respectively.
+          These are signed OpenWrt .apk packages. Install them with
+          "${apk_install}".
 
           ${signing_note}
           Every archive contains a single file named vmlinux, plus its .sha256
@@ -1441,30 +1355,35 @@ jobs:
               fi
             done
 
-            # The vmlinux-btf package belongs to this kernel version as well;
-            # its extension is apk on 25.x and ipk on older releases
+            # The vmlinux-btf package belongs to this kernel version as well.
+            # Only the signed .apk and its checksum are release assets.
             mapfile -t btf_names < <(jq -r --arg kv "${kernel_version}" \
               '.[] | select(.kernel_version == $kv) | .btf_dist_name' <<< "${MATRIX_JSON}")
 
             for name in "${btf_names[@]}"; do
-              for path in "dist/${name}".*; do
+              for path in "dist/${name}.apk" "dist/${name}.apk.sha256"; do
                 if [ -f "${path}" ]; then
                   files+=("${path}")
+                else
+                  echo "::error::Signed package asset ${path} is missing"
+                  exit 1
                 fi
               done
             done
 
             # Userspace packages: they do not depend on the kernel version, so
             # every release published by this run carries the full set. Their
-            # names come from the matrix (pinned upstream version), one package
-            # per OpenWrt architecture; the extension is apk on 25.x and ipk on
-            # older releases.
+            # names come from the matrix (pinned upstream version), one signed
+            # .apk per OpenWrt architecture.
             mapfile -t userspace_names < <(jq -r '[.[] | .dae_dist_name, .honk_dist_name] | unique[]' <<< "${MATRIX_JSON}")
 
             for name in "${userspace_names[@]}"; do
-              for path in "dist/${name}".*; do
+              for path in "dist/${name}.apk" "dist/${name}.apk.sha256"; do
                 if [ -f "${path}" ]; then
                   files+=("${path}")
+                else
+                  echo "::error::Signed package asset ${path} is missing"
+                  exit 1
                 fi
               done
             done
