@@ -147,7 +147,7 @@ jobs:
   # ---------------------------------------------------------------------------
   prepare:
     name: Resolve OpenWrt SDKs
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       openwrt_version: ${{ steps.resolve.outputs.openwrt_version }}
       release_date: ${{ steps.resolve.outputs.release_date }}
@@ -373,7 +373,7 @@ jobs:
   build:
     name: Build vmlinux (${{ matrix.openwrt_arch }})
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     # Compiling the stubs is fast; downloading and extracting the SDK dominates
     timeout-minutes: 90
     strategy:
@@ -392,7 +392,7 @@ jobs:
       BTF_DIST_NAME: ${{ matrix.btf_dist_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -846,7 +846,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.dist_name }}
           path: dist/*
@@ -867,7 +867,7 @@ jobs:
   dae:
     name: Build dae (${{ matrix.openwrt_arch }})
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -887,10 +887,10 @@ jobs:
     steps:
       # The repository root is an OpenWrt feed (dae/ and honk/ are packages)
       - name: Checkout this repository (feed)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout dae sources into the package directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: daeuniverse/dae
           ref: ${{ matrix.dae_git_tag }}
@@ -943,14 +943,34 @@ jobs:
           ./scripts/feeds update local
           ./scripts/feeds install -p local dae
 
-          echo "CONFIG_PACKAGE_dae=m" >> .config
           if [ "${PACKAGE_SIGNING:-0}" = "1" ]; then
             echo "CONFIG_SIGN_EACH_PACKAGE=y" >> .config
           fi
           make defconfig
 
+          # CONFIG_PACKAGE_dae cannot be selected in the SDK: dae depends on
+          # kmod-xdp-sockets-diag, whose KernelPackage is @KERNEL_XDP_SOCKETS,
+          # and the SDK kernel ships that option disabled. defconfig therefore
+          # drops the symbol from .config, and without it the SDK's compile
+          # target has no rule for the package at all: make exits 0 without
+          # building anything. Pass the symbol on the command line instead
+          # (command-line variables win over .config): the package is built and
+          # packaged as if it had been selected, and its runtime dependencies
+          # (ca-bundle, kmod-*) still end up in the package metadata.
+          #
           # One value for the package version and the version the binary reports
-          DAE_VERSION="${DAE_VERSION}" make package/dae/compile V=s
+          DAE_VERSION="${DAE_VERSION}" make package/dae/compile V=s CONFIG_PACKAGE_dae=m
+
+          # make is silent about a package that was not selected, which is how
+          # a missing apk used to reach the collect step as if the build had
+          # worked: fail here instead
+          mapfile -t built < <(find "${SDK_DIR}/bin/packages" \
+            \( -name 'dae-*.apk' -o -name 'dae_*.ipk' \) 2>/dev/null)
+          if [ "${#built[@]}" -ne 1 ]; then
+            echo "::error::The SDK produced ${#built[@]} dae packages, expected one"
+            find "${SDK_DIR}/bin" -type f | sed -n '1,50p' || true
+            exit 1
+          fi
 
       - name: Verify the package signatures
         if: env.PACKAGE_SIGNING == '1'
@@ -1001,7 +1021,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.DIST_NAME }}
           path: dist/*
@@ -1012,7 +1032,7 @@ jobs:
   honk:
     name: Build honk (${{ matrix.openwrt_arch }})
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -1039,10 +1059,10 @@ jobs:
     steps:
       # The repository root is an OpenWrt feed (dae/ and honk/ are packages)
       - name: Checkout this repository (feed)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout honk sources into the package directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: daeuniverse/honk
           ref: ${{ matrix.honk_git_tag }}
@@ -1215,7 +1235,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.DIST_NAME }}
           path: dist/*
@@ -1232,10 +1252,11 @@ jobs:
   release:
     name: Publish GitHub releases
     needs: [prepare, build, dae, honk]
-    # Publish the kernel assets whenever they built; the userspace jobs are best
-    # effort and their assets are attached when present
-    if: ${{ always() && needs.build.result == 'success' }}
-    runs-on: ubuntu-24.04
+    # A partial set is not a release: any failed matrix leg (kernel, dae or
+    # honk) skips publishing. `success()` is false when a needed job failed or
+    # was skipped, which is what a failed matrix leg does to its siblings.
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
     # Writing to a release needs contents: write (the workflow default is read)
     permissions:
       contents: write
@@ -1247,13 +1268,10 @@ jobs:
       MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
-        # Best effort: the kernel assets are what this job has to publish, the
-        # dae/honk assets are attached when those jobs succeeded
-        continue-on-error: true
         with:
           path: dist
           merge-multiple: true
