@@ -132,14 +132,16 @@ name: Build vmlinux (BTF)
 #           release and target
 #   public-key.pem                                 the key of every packages.adb
 #   en/ zh-cn/ zh-tw/ assets/                      the landing page
+# The mirror itself serves / and files/ (a listing), which the page links to.
 # Releases older than the newest of a series keep their kmods directory. Only
-# apk releases are published: 24.10 uses opkg, which has no repository tags,
+# apk releases are built: 24.10 uses opkg, which has no repository tags,
 # and 23.05 and older run kernels older than the 5.17 that dae needs.
 # Both outputs are optional: with upload_release and upload_feed off, a run
 # only builds, which tests a branch without publishing anything.
 #
-# Note: the five builds run in parallel and take a few minutes each, mostly the
-# SDK download. Trim the target list below if your plan limits concurrent jobs.
+# Note: the builds (three per target, plus the LuCI apps) run in parallel and
+# take a few minutes each, mostly the SDK download. Trim the target list below
+# if your plan limits concurrent jobs.
 #
 # Usage: Actions -> Build vmlinux (BTF) -> Run workflow -> enter an OpenWrt version
 # =============================================================================
@@ -191,6 +193,12 @@ jobs:
 
           if ! [[ "${OPENWRT_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Malformed OpenWrt version '${INPUT_VERSION}' - expected a release version such as 25.12.6"
+            exit 1
+          fi
+
+          # Only apk releases are built (see the header comment)
+          if [ "$(printf '%s\n' 25.12 "${OPENWRT_VERSION%.*}" | sort -V | head -n 1)" != 25.12 ]; then
+            echo "::error::OpenWrt ${OPENWRT_VERSION} is not supported - only apk releases (25.12 and later) are built"
             exit 1
           fi
 
@@ -794,7 +802,7 @@ jobs:
           # kernels and let dae install on official OpenWrt; both come from the
           # Makefile, so check that they reached the package
           info="$("${SDK_DIR}/staging_dir/host/bin/apk" --allow-untrusted adbdump "${found[0]}")"
-          if ! grep -Eq '^ +- kernel=' <<< "${info}" ||
+          if ! grep -Eq '^ +- kernel=[0-9.]+~[0-9a-f]{32}-r[0-9]+$' <<< "${info}" ||
              ! grep -Eq '^ +- kmod-xdp-sockets-diag$' <<< "${info}"; then
             echo "::error::vmlinux-btf lacks its kernel dependency or the kmod-xdp-sockets-diag provide"
             printf '%s\n' "${info}" | sed -n '1,40p'
@@ -955,18 +963,19 @@ jobs:
 
           make defconfig
 
-          # CONFIG_PACKAGE_dae cannot be selected in the SDK: dae depends on
-          # kmod-xdp-sockets-diag, whose KernelPackage is @KERNEL_XDP_SOCKETS,
-          # and the SDK kernel ships that option disabled. defconfig therefore
-          # drops the symbol from .config, and without it the SDK's compile
-          # target has no rule for the package at all: make exits 0 without
-          # building anything. Pass the symbol on the command line instead
-          # (command-line variables win over .config): the package is built and
-          # packaged as if it had been selected, and its runtime dependencies
+          # dae depends on kmod-xdp-sockets-diag, which the SDK kernel cannot
+          # build (KERNEL_XDP_SOCKETS is off) and vmlinux-btf provides, so
+          # feeds install brought vmlinux-btf in as well. Command-line variables
+          # win over .config: dae is selected here, as defconfig only keeps it
+          # through that provide (without dae in .config the compile target
+          # builds nothing and make still exits 0), and vmlinux-btf deselected:
+          # while it is selected its compile target is one of dae's, and it
+          # needs the BTF blob only the kernel job has. The runtime dependencies
           # (ca-bundle, kmod-*) still end up in the package metadata.
           #
           # One value for the package version and the version the binary reports
-          DAE_VERSION="${DAE_VERSION}" make package/dae/compile V=s CONFIG_PACKAGE_dae=m
+          DAE_VERSION="${DAE_VERSION}" make package/dae/compile V=s \
+            CONFIG_PACKAGE_dae=m CONFIG_PACKAGE_vmlinux-btf=
 
           # make is silent about a package that was not selected, which is how
           # a missing apk used to reach the collect step as if the build had
@@ -1262,16 +1271,20 @@ jobs:
 
           make defconfig
 
-          # The apps depend on dae and honk, which the SDK cannot select (see
-          # the dae job), so the symbols are passed on the command line as well.
           # The translations are only built by default for the languages of the
-          # image, so they are selected the same way.
+          # image, so they are selected on the command line (which wins over
+          # .config), the apps with them. The apps' compile targets depend on
+          # those of dae and honk, and dae's on vmlinux-btf's (see the dae job),
+          # none of which can be built here: their own jobs build them.
+          # Deselected the same way, the SDK skips them, and the apps' packages
+          # still depend on dae and honk.
           packages=(luci-lib-daeuniverse luci-app-dae luci-app-honk
             luci-i18n-daeuniverse-zh-cn luci-i18n-daeuniverse-zh-tw)
           config=("${packages[@]/#/CONFIG_PACKAGE_}")
           make package/luci-lib-daeuniverse/compile \
             package/luci-app-dae/compile package/luci-app-honk/compile V=s \
-            "${config[@]/%/=m}"
+            "${config[@]/%/=m}" \
+            CONFIG_PACKAGE_dae= CONFIG_PACKAGE_honk= CONFIG_PACKAGE_vmlinux-btf=
 
           for name in "${packages[@]}"; do
             if ! find bin/packages -path '*/local/*' -name "${name}-*.apk" | grep -q .; then
@@ -1681,18 +1694,19 @@ jobs:
             echo "MIRROR_DEST=${MIRROR_USER}@${MIRROR_HOST}:"
           } >> "$GITHUB_ENV"
 
-      # Packages first and the indexes last, so a device never reads an index
-      # that names a file the mirror does not have yet. --delay-updates swaps
-      # the index in after the packages, and packages it no longer names are
-      # deleted only after that. Each architecture and target directory is
-      # synced on its own, so a run that builds fewer targets leaves the
-      # directories of the others alone.
+      # The first pass only creates the directories and the public key. Each
+      # architecture and target directory is then synced on its own with
+      # --delay-updates: its packages, which are signed anew on every run, and
+      # its index only replace the old ones at the end, all at once, so a
+      # device does not read an index that does not match the files, and
+      # packages the index no longer names are deleted only after that. A run
+      # that builds fewer targets leaves the directories of the others alone.
       - name: Upload the packages and indexes
         run: |
           set -euo pipefail
 
           series="${OPENWRT_VERSION%.*}"
-          rsync -rtv --chmod=D755,F644 --exclude=packages.adb "${SITE_DIR}/" "${MIRROR_DEST}"
+          rsync -rtv --chmod=D755,F644 --exclude='*.apk' --exclude=packages.adb "${SITE_DIR}/" "${MIRROR_DEST}"
           cd "${SITE_DIR}"
           for dir in "${series}"/packages/*/ "${series}/kmods/${OPENWRT_VERSION}"/*/*/; do
             rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay "${dir}" "${MIRROR_DEST}${dir}"
