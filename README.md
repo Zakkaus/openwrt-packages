@@ -291,7 +291,7 @@ honk**. Both are thin settings on one shared page from `luci-lib-daeuniverse`,
 which has three tabs:
 
 * **Service status** — whether the service runs, the enabled switch and the
-  configuration file (a `.dae` file under `/etc/dae` or `/etc/honk`, the only
+  configuration file (a file under `/etc/dae` or `/etc/honk`, the only
   directories the page may read and write). Saving and applying hands the
   switch to the init script, which starts or stops the service; turning one
   service on turns the other off, as the page notes next to the switch.
