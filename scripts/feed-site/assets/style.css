@@ -214,7 +214,7 @@ svg.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCol
 @media (max-width: 640px) {
 	html { scroll-padding-top: 104px; }
 	.topbar { flex-wrap: wrap; row-gap: var(--space-1); height: auto; padding-block: var(--space-3) var(--space-2); }
-	.topbar-nav { order: 1; width: 100%; margin: 0 0 0 calc(-1 * var(--space-3)); overflow-x: auto; }
+	.topbar-nav { order: 1; width: 100%; margin: 0 0 0 calc(-1 * var(--space-3)); }
 	.topbar-actions { margin-left: auto; }
 	.page { padding-top: var(--space-8); }
 }
