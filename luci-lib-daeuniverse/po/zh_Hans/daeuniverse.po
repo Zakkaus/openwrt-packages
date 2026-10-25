@@ -15,6 +15,9 @@ msgstr "配置文件"
 msgid "Configuration is invalid, the service was not reloaded"
 msgstr "配置有误，服务未重新加载"
 
+msgid "Unable to read %s: %s"
+msgstr "无法读取 %s：%s"
+
 msgid "dae and honk cannot run at the same time; enabling %s turns %s off."
 msgstr "dae 和 honk 不能同时运行，启用 %s 会关闭 %s。"
 
@@ -27,8 +30,8 @@ msgstr "启用"
 msgid "Log"
 msgstr "日志"
 
-msgid "Must be a .dae file in %s"
-msgstr "必须是 %s 中的 .dae 文件"
+msgid "Must be a file in %s"
+msgstr "必须是 %s 中的文件"
 
 msgid "No log entries."
 msgstr "暂无日志。"

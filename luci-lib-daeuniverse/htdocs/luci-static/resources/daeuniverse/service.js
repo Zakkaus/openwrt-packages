@@ -288,7 +288,12 @@ const ServiceView = view.extend({
 	load() {
 		return uci.load(this.app.name).then(() => {
 			const entry = uci.get(this.app.name, 'config', 'config_file') || this.app.defaultConfig;
-			return Promise.all([ entry, collectFiles(entry, readFromDisk) ]);
+			// A file the page may not read leaves the status and the log usable,
+			// so config_file can be set back from here.
+			return Promise.all([ entry, collectFiles(entry, readFromDisk).catch(err => {
+				ui.addNotification(null, E('p', _('Unable to read %s: %s').format(entry, err.message)), 'error');
+				return [];
+			}) ]);
 		});
 	},
 
@@ -448,8 +453,7 @@ const ServiceView = view.extend({
 		// The page may only read and write this directory (see the ACL)
 		o.validate = (section_id, value) => {
 			const dir = dirname(defaultConfig);
-			return !value || (normalize(value) === value && value.startsWith(dir + '/') && value.endsWith('.dae')) ||
-				_('Must be a .dae file in %s').format(dir);
+			return (normalize(value) === value && value.startsWith(dir + '/')) || _('Must be a file in %s').format(dir);
 		};
 
 		return m.render().then(mapNode => {
