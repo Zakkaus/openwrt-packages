@@ -123,15 +123,17 @@ name: Build vmlinux (BTF)
 # Package feed: when the repository has a mirror configured (the MIRROR_*
 # variables and the MIRROR_SSH_KEY secret, see the feed job), the same packages
 # plus the LuCI apps are also published as signed apk repositories, with a
-# landing page (scripts/feed-site/) that explains how to use them:
-#   <series>/packages/<openwrt_arch>/              dae, honk and the LuCI apps,
+# landing page (scripts/feed-site/) that explains how to use them. The feed
+# and the page are uploaded to two directories, so the feed holds nothing else:
+#   feed/<series>/packages/<openwrt_arch>/         dae, honk and the LuCI apps,
 #           shared by every release of the series (25.12) and by ImmortalWrt
-#   <series>/kmods/<openwrt_version>/<target>/<subtarget>/
+#   feed/<series>/kmods/<openwrt_version>/<target>/<subtarget>/
 #           vmlinux-btf, which only installs on the exact kernel of that
 #           release and target
-#   public-key.pem                                 the key of every packages.adb
-#   en/ zh-cn/ zh-tw/ assets/                      the landing page
-# The mirror itself serves / (a redirect to a language) and files/ (a listing).
+#   feed/public-key.pem                            the key of every packages.adb
+#   site/en/ site/zh-cn/ site/zh-tw/ site/assets/  the landing page
+# The mirror serves feed/ and site/ under one address, plus / (a redirect to a
+# language) and files/ (a listing of feed/); its rsync module is feed/ alone.
 # Releases older than the newest of a series keep their kmods directory. Only
 # apk releases are built: 24.10 uses opkg, which has no repository tags,
 # and 23.05 and older run kernels older than the 5.17 that dae needs.
@@ -1601,7 +1603,8 @@ jobs:
   # mirror are left alone, and the landing page lists everything the mirror
   # then serves.
   #
-  # The mirror only accepts rsync (rrsync) under its feed root. Configure:
+  # The mirror only accepts rsync (rrsync) under the directory that holds feed/
+  # and site/. Configure:
   #   secret   MIRROR_SSH_KEY      private key of the upload account
   #   variable MIRROR_HOST, MIRROR_PORT, MIRROR_USER
   #   variable MIRROR_KNOWN_HOSTS  the known_hosts line of MIRROR_HOST
@@ -1625,7 +1628,7 @@ jobs:
       TARGETS_JSON: ${{ needs.prepare.outputs.targets }}
       ARCHES_JSON: ${{ needs.prepare.outputs.arches }}
       # runner.temp is not available at job level
-      SITE_DIR: ${{ github.workspace }}/_site
+      FEED_DIR: ${{ github.workspace }}/_feed
       # Only for its apk-tools, the same that built and signed the packages
       SDK_URL: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_url }}
       SDK_FALLBACK_URL: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_fallback_url }}
@@ -1656,7 +1659,7 @@ jobs:
           # apk resolves a relative --keys-dir against the root (/), not the
           # working directory
           keys="${GITHUB_WORKSPACE}/keys"
-          root="${SITE_DIR}/${OPENWRT_VERSION%.*}"
+          root="${FEED_DIR}/${OPENWRT_VERSION%.*}"
 
           place() {
             local name version
@@ -1688,20 +1691,20 @@ jobs:
             (
               cd "${dir}"
               "${apk}" --keys-dir "${keys}" mkndx --output packages.adb \
-                --description "daeuniverse ${dir#"${SITE_DIR}/"}" *.apk
+                --description "daeuniverse ${dir#"${FEED_DIR}/"}" *.apk
               "${apk}" --allow-untrusted adbsign --sign-key "${keys}/private-key.pem" \
                 --reset-signatures packages.adb
               "${apk}" --keys-dir "${keys}" verify packages.adb
             )
           done < <(find "${root}" -name '*.apk' -printf '%h\n' | sort -u)
 
-          install -m 644 "${keys}/public-key.pem" "${SITE_DIR}/public-key.pem"
+          install -m 644 "${keys}/public-key.pem" "${FEED_DIR}/public-key.pem"
 
           {
             echo "### Feed ${OPENWRT_VERSION}"
             echo ""
             echo '```'
-            ( cd "${SITE_DIR}" && find . -type f | sort )
+            ( cd "${FEED_DIR}" && find . -type f | sort )
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1743,15 +1746,15 @@ jobs:
           set -euo pipefail
 
           series="${OPENWRT_VERSION%.*}"
-          rsync -rtv --chmod=D755,F644 --exclude='*.apk' --exclude=packages.adb "${SITE_DIR}/" "${MIRROR_DEST}"
-          cd "${SITE_DIR}"
+          rsync -rtv --chmod=D755,F644 --exclude='*.apk' --exclude=packages.adb "${FEED_DIR}/" "${MIRROR_DEST}feed/"
+          cd "${FEED_DIR}"
           for dir in "${series}"/packages/*/ "${series}/kmods/${OPENWRT_VERSION}"/*/*/; do
-            rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay "${dir}" "${MIRROR_DEST}${dir}"
+            rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay "${dir}" "${MIRROR_DEST}feed/${dir}"
           done
 
       # The page lists every release on the mirror, so it is written from the
-      # mirror's file list after the upload. Only the page directories are
-      # replaced; --delete-delay does not touch the excluded feed.
+      # mirror's file list after the upload. site/ holds only the page, so
+      # whatever the page no longer has is deleted there.
       - name: Write and upload the landing page
         env:
           MIRROR_URL: ${{ vars.MIRROR_URL || 'https://openwrt.daeuniverse.org' }}
@@ -1760,13 +1763,11 @@ jobs:
           set -euo pipefail
 
           page="${RUNNER_TEMP}/page"
-          rsync --list-only -r --include='*/' --include='packages.adb' --exclude='*' "${MIRROR_DEST}" \
+          rsync --list-only -r --include='*/' --include='packages.adb' --exclude='*' "${MIRROR_DEST}feed/" \
             | awk '$NF ~ /\/packages\.adb$/ { print $NF }' \
             | python3 scripts/feed-site/generate.py "${page}" "${MIRROR_URL}" "${MIRROR_RSYNC_URL}"
 
-          rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay \
-            --include='/en/***' --include='/zh-cn/***' --include='/zh-tw/***' --include='/assets/***' --exclude='*' \
-            "${page}/" "${MIRROR_DEST}"
+          rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay "${page}/" "${MIRROR_DEST}site/"
 
       - name: Remove the mirror key
         if: always()
