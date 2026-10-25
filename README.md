@@ -90,8 +90,8 @@ Every archive and package is uploaded together with its `.sha256` checksum.
 The `dae` and
 `honk` packages are built once per OpenWrt architecture and are pinned to an
 upstream release, so their name carries that version and not the kernel version;
-`x86_64` gets `25.12.5-dae-2.1.1-x86_64.apk` while `aarch64_cortex-a76` gets
-`25.12.5-honk-0.1.0_beta1-aarch64_cortex-a76.apk`. OpenWrt 25.x produces
+`x86_64` gets `25.12.6-dae-2.1.1-x86_64.apk` while `aarch64_cortex-a76` gets
+`25.12.6-honk-0.1.0_beta1-aarch64_cortex-a76.apk`. OpenWrt 25.x produces
 `.apk` packages. The workflow signs those packages and publishes only the
 signed `.apk` files. Older `.ipk` output is not supported and fails the build.
 
@@ -120,7 +120,7 @@ publishing anything.
 
 3. The result appears under **Releases**, tagged
    `openwrt-<openwrt_version>-<kernel_version>-<date>` — for example
-   `openwrt-25.12.5-6.12.94-20261024`. `<date>` is the UTC date of the run, the
+   `openwrt-25.12.6-6.12.112-20261024`. `<date>` is the UTC date of the run, the
    same for every kernel version it publishes. All targets of one kernel
    version are collected in that single release; re-running the workflow
    overwrites the existing assets instead of failing, and an existing
@@ -160,8 +160,8 @@ package of that name, and apk takes a real package over any provider.
 The `dae` and `honk` assets are OpenWrt packages as well:
 
 ```sh
-apk add 25.12.5-dae-2.1.1-aarch64_cortex-a76.apk
-apk add 25.12.5-honk-0.1.0_beta1-aarch64_cortex-a76.apk
+apk add 25.12.6-dae-2.1.1-aarch64_cortex-a76.apk
+apk add 25.12.6-honk-0.1.0_beta1-aarch64_cortex-a76.apk
 ```
 
 The packages are signed after the SDK build, so `apk` accepts them once
@@ -438,12 +438,12 @@ of each target in the download index.
 
 **downloads** — every OpenWrt input comes from the official downloads server,
 `https://downloads.openwrt.org/releases/<version>/`, with
-`https://openwrt.pixeldeck.net/releases/<version>/` as a fallback mirror: the
-same release tree, so only the host differs, which makes the mirror both a
-substitute when the official host is unreachable or slow and the place that
-still serves a release the official tree has rotated into
-`archive.openwrt.org`. `prepare` records the host that serves the release and
-the other one as fallback; each job downloads the SDK with
+`https://ftp.nluug.nl/os/Linux/distr/openwrt/` and
+`https://openwrt.pixeldeck.net/` as fallback mirrors: the same release tree, so
+only the host differs, which makes a mirror both a substitute when the official
+host is unreachable or slow and the place that still serves a release the
+official tree has rotated into `archive.openwrt.org`. `prepare` records the first host that serves the
+release and the next one as fallback; each job downloads the SDK with
 [`scripts/fetch-openwrt-sdk.sh`](scripts/fetch-openwrt-sdk.sh), which tries the
 official host first, then the mirror, and verifies every download against the
 `sha256sums` published in the same directory (a mismatch or a truncated transfer
@@ -536,8 +536,10 @@ JavaScript, JSON and translations, so one build serves every architecture.
 `MIRROR_SSH_KEY` secret) and `upload_feed` is on. It stores every package as
 `<name>-<version>.apk`, the name apk fetches, writes and signs one
 `packages.adb` per directory with the SDK's apk, and uploads with rsync to an
-account restricted to the feed root: packages first, then the indexes, so a
-device never reads an index that names a missing file. A run replaces the
+account restricted to the directory that holds `feed/` and `site/`: the feed
+goes to `feed/`, each directory's packages and index replacing the old ones
+together at the end, so a device never reads an index that names a missing
+file; the landing page goes to `site/`. A run replaces the
 packages of its series and the kmods of its release and leaves other releases
 alone. Last, it lists the indexes the mirror serves and writes the landing page
 from them with [`scripts/feed-site/generate.py`](scripts/feed-site/generate.py).

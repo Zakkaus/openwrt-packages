@@ -34,10 +34,10 @@ name: Build vmlinux (BTF)
 # approach wants.
 #
 # Every OpenWrt input is downloaded from the official downloads server
-# (downloads.openwrt.org), with openwrt.pixeldeck.net as a fallback mirror: both
-# serve the same release tree, so only the host differs. The prepare job picks
-# the host that serves the requested release and records the other one as the
-# fallback for the build jobs, and every job downloads the SDK through
+# (downloads.openwrt.org), with ftp.nluug.nl and openwrt.pixeldeck.net as
+# fallback mirrors: they serve the same release tree, so only the host differs. The prepare job picks
+# the first host that serves the requested release and records the next one as
+# the fallback for the build jobs, and every job downloads the SDK through
 # scripts/fetch-openwrt-sdk.sh, which retries on the fallback and checks each
 # download against the sha256sums published in the same directory. Every URL
 # that is used is printed: prepare logs each request and lists the SDK URL (and
@@ -66,9 +66,10 @@ name: Build vmlinux (BTF)
 #   honk/ - package "honk", one per architecture: Rust, cross compiled with the
 #           OpenWrt SDK toolchain: its C/C++ dependencies (BoringSSL, SQLite)
 #           are built by the SDK gcc/g++, and it links against the musl of that
-#           SDK, so the device needs libstdcpp. The full feature set is enabled (clash-api,
-#           mimalloc, rprx, ebpf, native-ui): native-ui embeds the doona
-#           dashboard downloaded from its release, so the UI is not built here.
+#           SDK, so the device needs libstdcpp. The full feature set is
+#           enabled (clash-api, mimalloc, rprx, ebpf, native-ui): native-ui
+#           embeds the doona dashboard downloaded from its release, so the UI
+#           is not built here.
 # These jobs only provide the toolchains (Go release tarball, rustup's prebuilt
 # toolchains, the prebuilt bpf-linker) and then let the SDK build the packages,
 # so the assets are real OpenWrt .apk packages. Older .ipk output is not
@@ -114,7 +115,7 @@ name: Build vmlinux (BTF)
 # All targets sharing the same kernel version are published together in one
 # GitHub Release with the gh CLI, tagged:
 #   openwrt-<openwrt_version>-<kernel_version>-<date>
-#   e.g. openwrt-25.12.5-6.12.94-20261024
+#   e.g. openwrt-25.12.6-6.12.112-20261024
 # <date> is the UTC date of the run, the same for every kernel version it
 # publishes. The tag is checked first and only created when it does not exist
 # yet; existing assets are overwritten on re-runs, so a second run on the same
@@ -205,8 +206,8 @@ jobs:
           fi
 
           # OpenWrt resources come from the official downloads server, with
-          # openwrt.pixeldeck.net as a fallback: both serve the same release
-          # tree, so only the host differs. The fallback covers the official
+          # two mirrors as fallbacks: they serve the same release tree, so only
+          # the host differs. The fallback covers the official
           # host being unreachable or slow, and releases the official tree has
           # already rotated into archive.openwrt.org.
           OPENWRT_MIRRORS=(
@@ -391,7 +392,7 @@ jobs:
           # above. They are pinned to upstream releases and only carry that
           # version, so they are named here and reused by the build and release
           # jobs.
-          while IFS='|' read -r openwrt_arch kernel_arch path; do
+          while IFS='|' read -r openwrt_arch _ path; do
             if ! jq -ec --arg arch "${openwrt_arch}" --arg path "${path}" \
               --arg dae_version "${DAE_VERSION}" \
               --arg dae_git_tag "${DAE_GIT_TAG}" \
@@ -489,7 +490,7 @@ jobs:
             echo "::warning::this pahole cannot write a detached BTF blob, the -J + objcopy fallback will be used"
           fi
 
-      # Official downloads server first, openwrt.pixeldeck.net as the fallback,
+      # The host prepare picked first, the next mirror as the fallback,
       # every download checked against the publisher's sha256sums (see the
       # script). SDK_DIR is exported for the steps below.
       - name: Download and extract the OpenWrt SDK
@@ -968,7 +969,7 @@ jobs:
             build-essential bzip2 perl python3 rsync unzip git ca-certificates file \
             clang llvm
 
-      # Official downloads server first, openwrt.pixeldeck.net as the fallback,
+      # The host prepare picked first, the next mirror as the fallback,
       # every download checked against the publisher's sha256sums (see the
       # script). SDK_DIR is exported for the steps below.
       - name: Download and extract the OpenWrt SDK
@@ -1098,7 +1099,7 @@ jobs:
           fetch-depth: 0
           path: honk/src
 
-      # Official downloads server first, openwrt.pixeldeck.net as the fallback,
+      # The host prepare picked first, the next mirror as the fallback,
       # every download checked against the publisher's sha256sums (see the
       # script). SDK_DIR is exported for the steps below.
       - name: Download and extract the OpenWrt SDK
@@ -1348,8 +1349,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 5. Publish one GitHub Release per kernel version, collecting the assets of
-  #    every architecture that shares it (the archive and the vmlinux-btf
-  #    package, plus the userspace binaries)
+  #    every target that shares it (the archive and the vmlinux-btf package,
+  #    plus the userspace packages of every architecture)
   #    tag = openwrt-<openwrt_version>-<kernel_version>-<date>
   # ---------------------------------------------------------------------------
   release:
@@ -1473,8 +1474,8 @@ jobs:
           $(printf '%s\n' "${btf_assets[@]}")
 
           Userspace packages (dae, honk) for all OpenWrt architectures of this
-          run, when available, are attached as well. They are pinned to upstream
-          releases and do not depend on the kernel version:
+          run are attached as well. They are pinned to upstream releases and do
+          not depend on the kernel version:
 
           - <openwrt_version>-dae-2.1.1-<openwrt_arch>.apk
           - <openwrt_version>-honk-0.1.0_beta1-<openwrt_arch>.apk

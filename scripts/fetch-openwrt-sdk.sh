@@ -2,11 +2,11 @@
 #
 # Download and unpack the OpenWrt SDK of one target.
 #
-# The SDK comes from the official downloads server (SDK_URL) and, when the build
-# matrix provides one, from the openwrt.pixeldeck.net mirror (SDK_FALLBACK_URL):
-# both serve the same release tree, so the mirror covers the official host being
-# unreachable or slow, and releases the official tree has already rotated into
-# archive.openwrt.org.
+# The SDK comes from the host the prepare job picked (SDK_URL, the official
+# downloads server when it serves the release) and, when prepare found one, from
+# the next mirror that does (SDK_FALLBACK_URL): they serve the same release
+# tree, so the mirror covers the official host being unreachable or slow, and
+# releases the official tree has already rotated into archive.openwrt.org.
 #
 # Every download is verified against the sha256sums published in the same
 # directory, so a truncated or corrupted transfer is retried on the next mirror
