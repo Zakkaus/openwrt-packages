@@ -931,11 +931,8 @@ jobs:
           # Host tools the OpenWrt SDK's make expects, plus clang for the eBPF
           # objects that bpf2go embeds
           sudo apt-get install -y --no-install-recommends \
-            build-essential bzip2 perl python3 rsync unzip git ca-certificates file
-          if ! sudo apt-get install -y --no-install-recommends clang-15 llvm-15; then
-            echo "::warning::clang-15 is not available, falling back to the default clang"
-            sudo apt-get install -y --no-install-recommends clang llvm
-          fi
+            build-essential bzip2 perl python3 rsync unzip git ca-certificates file \
+            clang llvm
 
       # Official downloads server first, openwrt.pixeldeck.net as the fallback,
       # every download checked against the publisher's sha256sums (see the
