@@ -55,11 +55,14 @@ name: Build vmlinux (BTF)
 # is built for every target of these architectures that the release lists in
 # .targets.json (18 on 25.12), with no list to maintain here.
 #
-# Three packages are built from this repository, whose root doubles as an
+# Four packages are built from this repository, whose root doubles as an
 # OpenWrt feed, and published in the same release:
 #   vmlinux-btf/ - package "vmlinux-btf", one per target: the detached BTF blob
 #           of that target, installed as /usr/lib/debug/boot/vmlinux plus the
 #           vmlinux-<kernel.release> symlink; its version is the kernel version
+#   vmlinux-btf-builtin/ - package "vmlinux-btf-builtin", architecture
+#           independent and empty: provides vmlinux-btf on a kernel with its
+#           own BTF (ImmortalWrt), where vmlinux-btf does not install
 #   dae/  - package "dae", one per architecture: Go, statically linked
 #           (CGO_ENABLED=0); no target C compiler is involved, its eBPF objects
 #           are compiled by clang
@@ -80,6 +83,7 @@ name: Build vmlinux (BTF)
 #   <openwrt_version>-vmlinux-btf-<target>-<subtarget>-<kernel_version>.apk
 #   <openwrt_version>-dae-<dae_version>-<openwrt_arch>.apk
 #   <openwrt_version>-honk-<honk_version>-<openwrt_arch>.apk
+#   vmlinux-btf-builtin-<version>.apk (the package file name)
 #   e.g. 25.12.6-vmlinux-btf-mediatek-filogic-6.12.112.apk
 # Each vmlinux archive holds a single file named "vmlinux": the detached BTF
 # data, which is the same file upstream installs as
@@ -123,11 +127,12 @@ name: Build vmlinux (BTF)
 #
 # Package feed: when the repository has a mirror configured (the MIRROR_*
 # variables and the MIRROR_SSH_KEY secret, see the feed job), the same packages
-# plus the LuCI apps are also published as signed apk repositories, with a
+# and the LuCI apps are also published as signed apk repositories, with a
 # landing page (scripts/feed-site/) that explains how to use them. The feed
 # and the page are uploaded to two directories, so the feed holds nothing else:
-#   feed/<series>/packages/<openwrt_arch>/         dae, honk and the LuCI apps,
-#           shared by every release of the series (25.12) and by ImmortalWrt
+#   feed/<series>/packages/<openwrt_arch>/         dae, honk, the LuCI apps and
+#           vmlinux-btf-builtin, shared by every release of the series (25.12)
+#           and by ImmortalWrt
 #   feed/<series>/kmods/<openwrt_version>/<target>/<subtarget>/
 #           vmlinux-btf, which only installs on the exact kernel of that
 #           release and target
@@ -142,8 +147,9 @@ name: Build vmlinux (BTF)
 # only builds, which tests a branch without publishing anything.
 #
 # Note: the builds (one per target for the BTF, dae and honk per architecture,
-# plus the LuCI apps) run in parallel and take a few minutes each, mostly the
-# SDK download; on a plan with few concurrent jobs they queue.
+# plus the architecture independent packages) run in parallel and take a few
+# minutes each, mostly the SDK download; on a plan with few concurrent jobs
+# they queue.
 #
 # Usage: Actions -> Build vmlinux (BTF) -> Run workflow -> enter an OpenWrt version
 # =============================================================================
@@ -833,13 +839,11 @@ jobs:
             exit 1
           fi
 
-          # The kernel lock and the provide are what keep the package off other
-          # kernels and let dae install on official OpenWrt; both come from the
-          # Makefile, so check that they reached the package
+          # The kernel lock is what keeps the package off other kernels; it
+          # comes from the Makefile, so check that it reached the package
           info="$("${SDK_DIR}/staging_dir/host/bin/apk" --allow-untrusted adbdump "${found[0]}")"
-          if ! grep -Eq '^ +- kernel=[0-9.]+~[0-9a-f]{32}-r[0-9]+$' <<< "${info}" ||
-             ! grep -Eq '^ +- kmod-xdp-sockets-diag$' <<< "${info}"; then
-            echo "::error::vmlinux-btf lacks its kernel dependency or the kmod-xdp-sockets-diag provide"
+          if ! grep -Eq '^ +- kernel=[0-9.]+~[0-9a-f]{32}-r[0-9]+$' <<< "${info}"; then
+            echo "::error::vmlinux-btf lacks its kernel dependency"
             printf '%s\n' "${info}" | sed -n '1,40p'
             exit 1
           fi
@@ -995,15 +999,12 @@ jobs:
 
           make defconfig
 
-          # dae depends on kmod-xdp-sockets-diag, which the SDK kernel cannot
-          # build (KERNEL_XDP_SOCKETS is off) and vmlinux-btf provides, so
-          # feeds install brought vmlinux-btf in as well. Command-line variables
-          # win over .config, so the build does not depend on what defconfig
-          # made of that: dae is selected (without it the compile target builds
-          # nothing and make still exits 0). vmlinux-btf is deselected, as its
-          # compile target is one of dae's while it is selected and needs the
-          # BTF blob only the kernel job has. The runtime dependencies
-          # (ca-bundle, kmod-*) still end up in the package metadata.
+          # dae depends on vmlinux-btf, so feeds install brought it in, and its
+          # compile target is one of dae's while it is selected: it needs the
+          # BTF blob only the kernel job has, so it is deselected. Command-line
+          # variables win over .config, and dae is selected the same way
+          # (without it the compile target builds nothing and make still exits
+          # 0). The dependency still ends up in the package metadata.
           #
           # One value for the package version and the version the binary reports
           DAE_VERSION="${DAE_VERSION}" make package/dae/compile V=s \
@@ -1206,9 +1207,10 @@ jobs:
           echo "CONFIG_PACKAGE_honk=m" >> .config
           make defconfig
 
+          # vmlinux-btf is deselected as in the dae job.
           # One value for the package version and the version the binary reports
           HONK_VERSION="${HONK_VERSION}" HONK_GIT_TAG="${HONK_GIT_TAG}" \
-            make package/honk/compile V=s
+            make package/honk/compile V=s CONFIG_PACKAGE_vmlinux-btf=
 
       - name: Sign and verify the package
         run: bash "${GITHUB_WORKSPACE}/scripts/sign-packages.sh"
@@ -1249,13 +1251,14 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # 4. LuCI apps: luci-lib-daeuniverse (the page both apps share, plus its
-  #    translations), luci-app-dae and luci-app-honk. They are architecture
-  #    independent (PKGARCH all), so one SDK builds them for every feed; luci.mk
-  #    and its host tools come from the luci and base feeds of that SDK.
+  # 4. Architecture independent packages (PKGARCH all), which one SDK builds
+  #    for every architecture: the LuCI apps, i.e. luci-lib-daeuniverse (the
+  #    page both apps share, plus its translations), luci-app-dae and
+  #    luci-app-honk, and vmlinux-btf-builtin. luci.mk and its host tools come
+  #    from the luci and base feeds of that SDK.
   # ---------------------------------------------------------------------------
   luci:
-    name: Build the LuCI apps
+    name: Build the LuCI apps and vmlinux-btf-builtin
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -1299,22 +1302,25 @@ jobs:
           # luci-base (po2lmo, jsmin), which the SDK only builds with luci-base in
           # its package tree
           ./scripts/feeds install -p luci luci-base
-          ./scripts/feeds install -p local luci-lib-daeuniverse luci-app-dae luci-app-honk
+          ./scripts/feeds install -p local luci-lib-daeuniverse luci-app-dae luci-app-honk \
+            vmlinux-btf-builtin
 
           make defconfig
 
           # The translations are only built by default for the languages of the
           # image, so they are selected on the command line (which wins over
           # .config), the apps with them. The apps' compile targets depend on
-          # those of dae and honk, and dae's on vmlinux-btf's (see the dae job),
-          # none of which can be built here: their own jobs build them.
+          # those of dae and honk, and theirs on vmlinux-btf's (see the dae
+          # job), none of which can be built here: their own jobs build them.
           # Deselected the same way, the SDK skips them, and the apps' packages
           # still depend on dae and honk.
           packages=(luci-lib-daeuniverse luci-app-dae luci-app-honk
-            luci-i18n-daeuniverse-zh-cn luci-i18n-daeuniverse-zh-tw)
+            luci-i18n-daeuniverse-zh-cn luci-i18n-daeuniverse-zh-tw
+            vmlinux-btf-builtin)
           config=("${packages[@]/#/CONFIG_PACKAGE_}")
           make package/luci-lib-daeuniverse/compile \
-            package/luci-app-dae/compile package/luci-app-honk/compile V=s \
+            package/luci-app-dae/compile package/luci-app-honk/compile \
+            package/vmlinux-btf-builtin/compile V=s \
             "${config[@]/%/=m}" \
             CONFIG_PACKAGE_dae= CONFIG_PACKAGE_honk= CONFIG_PACKAGE_vmlinux-btf=
 
@@ -1326,9 +1332,23 @@ jobs:
             fi
           done
 
+          # ImmortalWrt only gets dae and honk through these fields of
+          # vmlinux-btf-builtin, which come from its Makefile: check that they
+          # reached the package
+          info="$(staging_dir/host/bin/apk --allow-untrusted adbdump \
+            "$(find bin/packages -path '*/local/*' -name 'vmlinux-btf-builtin-*.apk')")"
+          if ! grep -Eq '^ +- vmlinux-btf$' <<< "${info}" ||
+             ! grep -Eq '^  provider-priority: [1-9]' <<< "${info}" ||
+             ! grep -Eq '^  arch: noarch$' <<< "${info}" ||
+             ! grep -Eq '^  pre-install: ' <<< "${info}"; then
+            echo "::error::vmlinux-btf-builtin lacks its vmlinux-btf provide, priority, noarch or pre-install check"
+            printf '%s\n' "${info}" | sed -n '1,40p'
+            exit 1
+          fi
+
       - name: Sign and verify the packages
         env:
-          PACKAGE_DIR: ${{ runner.temp }}/luci-apks
+          PACKAGE_DIR: ${{ runner.temp }}/noarch-apks
         run: |
           set -euo pipefail
           # Only this repository's packages: the SDK may have built LuCI's own
@@ -1342,8 +1362,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: luci-apks
-          path: ${{ runner.temp }}/luci-apks/*.apk
+          name: noarch-apks
+          path: ${{ runner.temp }}/noarch-apks/*.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -1355,10 +1375,11 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Publish GitHub releases
-    needs: [prepare, build, dae, honk]
-    # A partial set is not a release: any failed matrix leg (kernel, dae or
-    # honk) skips publishing. `success()` is false when a needed job failed or
-    # was skipped, which is what a failed matrix leg does to its siblings.
+    needs: [prepare, build, dae, honk, luci]
+    # A partial set is not a release: any failed build job (kernel, dae, honk
+    # or the architecture independent packages) skips publishing. `success()`
+    # is false when a needed job failed or was skipped, which is what a failed
+    # matrix leg does to its siblings.
     if: ${{ success() && inputs.upload_release }}
     runs-on: ubuntu-latest
     # Writing to a release needs contents: write (the workflow default is read)
@@ -1480,6 +1501,10 @@ jobs:
           - <openwrt_version>-dae-2.1.1-<openwrt_arch>.apk
           - <openwrt_version>-honk-0.1.0_beta1-<openwrt_arch>.apk
 
+          Both depend on vmlinux-btf. On a kernel with its own BTF (ImmortalWrt)
+          vmlinux-btf-builtin-<version>.apk, attached as well, satisfies that
+          dependency instead.
+
           Both packages install an OpenWrt procd init script and a UCI
           configuration (/etc/config/dae, /etc/config/honk); the service is
           disabled until "option enabled '1'" is set. honk is built with the
@@ -1564,6 +1589,16 @@ jobs:
                 fi
               done
             done
+
+            # The stand-in for vmlinux-btf on a kernel with its own BTF, under
+            # its package file name (it has no architecture or kernel)
+            builtin=(dist/vmlinux-btf-builtin-*.apk)
+            if [ "${#builtin[@]}" -ne 1 ] || [ ! -f "${builtin[0]}" ]; then
+              echo "::error::Expected exactly one vmlinux-btf-builtin package in dist/"
+              exit 1
+            fi
+            ( cd dist && sha256sum "${builtin[0]#dist/}" > "${builtin[0]#dist/}.sha256" )
+            files+=("${builtin[0]}" "${builtin[0]}.sha256")
 
             # The public key that verifies the signatures of every .apk of this
             # release; it is also committed to the repository as
@@ -1678,8 +1713,8 @@ jobs:
           while IFS=$'\t' read -r arch dae honk; do
             place "dist/${dae}.apk" "${root}/packages/${arch}"
             place "dist/${honk}.apk" "${root}/packages/${arch}"
-            for luci in dist/luci-*.apk; do
-              place "${luci}" "${root}/packages/${arch}"
+            for noarch in dist/luci-*.apk dist/vmlinux-btf-builtin-*.apk; do
+              place "${noarch}" "${root}/packages/${arch}"
             done
           done < <(jq -r '.[] | [.openwrt_arch, .dae_dist_name, .honk_dist_name] | @tsv' <<< "${ARCHES_JSON}")
           while IFS=$'\t' read -r target subtarget btf; do

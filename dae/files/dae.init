@@ -46,6 +46,13 @@ start_service() {
 		return 1
 	fi
 
+	# apk does not stop at the failed check of vmlinux-btf-builtin, so a kernel
+	# without BTF can still get here
+	if [ ! -e /sys/kernel/btf/vmlinux ] && [ ! -e "/usr/lib/debug/boot/vmlinux-$(uname -r)" ]; then
+		logger -t dae "the kernel has no BTF: add the kmods repository, then run 'apk update && apk upgrade vmlinux-btf-builtin'"
+		return 1
+	fi
+
 	# `validate` runs the same rule pipeline as `run` (alias resolution,
 	# geosite/geoip expansion, rule lowering) without touching the eBPF
 	# datapath, so a broken configuration fails before the running instance

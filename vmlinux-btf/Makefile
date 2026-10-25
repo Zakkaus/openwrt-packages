@@ -60,18 +60,6 @@ define Package/vmlinux-btf
   # install it, instead of loading wrong struct layouts. Set here and not
   # globally, because BuildPackage resets it from Package/Default.
   EXTRA_DEPENDS:=kernel (=$(LINUX_VERSION)~$(LINUX_VERMAGIC)-r$(LINUX_RELEASE))
-  # dae depends on kmod-xdp-sockets-diag, which only distributions with BTF in
-  # their kernels ship (ImmortalWrt); official OpenWrt has neither. A virtual
-  # provide with a priority makes apk pick this package there and the real kmod
-  # wherever it exists. A versioned provide would win against the real kmod
-  # because of its higher version, and priority 0 is never picked by itself.
-  # In a buildroot dae then selects the real kmod unless vmlinux-btf is
-  # selected, and needs one of the two (kconfig reports that condition as a
-  # recursive dependency of dae on itself; the outcome is right): on official
-  # OpenWrt dae can only be selected with vmlinux-btf, with XDP sockets in the
-  # kernel (ImmortalWrt) it takes the real kmod.
-  PROVIDES:=@kmod-xdp-sockets-diag
-  DEFAULT_VARIANT:=1
 endef
 
 define Package/vmlinux-btf/description
