@@ -65,6 +65,11 @@ define Package/vmlinux-btf
   # provide with a priority makes apk pick this package there and the real kmod
   # wherever it exists. A versioned provide would win against the real kmod
   # because of its higher version, and priority 0 is never picked by itself.
+  # In a buildroot dae then selects the real kmod unless vmlinux-btf is
+  # selected, and needs one of the two (kconfig reports that condition as a
+  # recursive dependency of dae on itself; the outcome is right): on official
+  # OpenWrt dae can only be selected with vmlinux-btf, with XDP sockets in the
+  # kernel (ImmortalWrt) it takes the real kmod.
   PROVIDES:=@kmod-xdp-sockets-diag
   DEFAULT_VARIANT:=1
 endef
