@@ -1575,6 +1575,9 @@ jobs:
   #           ("[host]:port ssh-ed25519 ..." for a port other than 22)
   #   variable MIRROR_URL          address of the feed on the web, used by the
   #           landing page (default https://openwrt.daeuniverse.org)
+  #   variable MIRROR_RSYNC_URL    public rsync address of the feed, for the
+  #           page on mirroring it (default
+  #           rsync://openwrt.daeuniverse.org/openwrt-daeuniverse)
   # Without MIRROR_HOST (e.g. in a fork) or with upload_feed off the job is
   # skipped.
   # ---------------------------------------------------------------------------
@@ -1715,13 +1718,14 @@ jobs:
       - name: Write and upload the landing page
         env:
           MIRROR_URL: ${{ vars.MIRROR_URL || 'https://openwrt.daeuniverse.org' }}
+          MIRROR_RSYNC_URL: ${{ vars.MIRROR_RSYNC_URL || 'rsync://openwrt.daeuniverse.org/openwrt-daeuniverse' }}
         run: |
           set -euo pipefail
 
           page="${RUNNER_TEMP}/page"
           rsync --list-only -r --include='*/' --include='packages.adb' --exclude='*' "${MIRROR_DEST}" \
             | awk '$NF ~ /\/packages\.adb$/ { print $NF }' \
-            | python3 scripts/feed-site/generate.py "${page}" "${MIRROR_URL}"
+            | python3 scripts/feed-site/generate.py "${page}" "${MIRROR_URL}" "${MIRROR_RSYNC_URL}"
 
           rsync -rtv --chmod=D755,F644 --delay-updates --delete-delay \
             --include='/en/***' --include='/zh-cn/***' --include='/zh-tw/***' --include='/assets/***' --exclude='*' \
