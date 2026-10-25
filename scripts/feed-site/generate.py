@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Write the landing page of the package feed.
 
-Usage: generate.py <site-dir> <base-url> < index-paths
+Usage: generate.py <site-dir> <base-url> [<rsync-url>] < index-paths
 
 stdin lists the packages.adb files the feed serves, one path per line,
 relative to the feed root, so the page covers everything on the mirror and not
 only what one run built:
   <series>/packages/<arch>/packages.adb                       e.g. 25.12
   <series>/kmods/<release>/<target>/<subtarget>/packages.adb  e.g. 25.12.6
-It writes <lang>/index.html in English, Simplified and Traditional Chinese and copies
-assets/ next to them. Only the standard library is used.
+It writes <lang>/index.html in English, Simplified and Traditional Chinese, with
+an rsync URL also <lang>/mirror.html on mirroring the feed, and copies assets/
+next to them. Only the standard library is used.
 """
 
 import datetime
@@ -40,6 +41,7 @@ TEXT = {
 		'title': 'OpenWrt package feed',
 		'subtitle': 'apk packages of dae, honk and their LuCI apps for OpenWrt 25.12 and later.',
 		'nav_guide': 'Guide',
+		'nav_mirror': 'Mirror',
 		'nav_files': 'Files',
 		'language': 'Language',
 		'theme': 'Light or dark',
@@ -86,11 +88,21 @@ TEXT = {
 		'all_files': 'All files',
 		'source': 'Source',
 		'thanks': 'Mirror hosted by <a href="{gentoozh}">gentoo-zh</a>',
+		'mirror_title': 'Mirror the feed',
+		'mirror_subtitle': 'Sync the feed with rsync and serve it over HTTP(S). Packages and indexes are signed; routers verify them with the same key.',
+		'sync': 'Sync',
+		'sync_note': '<code>--delay-updates</code> and <code>--delete-delay</code> keep indexes consistent with packages. Syncing every few hours is enough.',
+		'serve': 'Serve',
+		'serve_note': 'Serve the directory unchanged; routers request <code>&lt;series&gt;/packages/&lt;arch&gt;/</code> and <code>&lt;series&gt;/kmods/&lt;release&gt;/&lt;target&gt;/&lt;subtarget&gt;/</code>.',
+		'use': 'Use',
+		'use_note': 'Follow the <a href="./">guide</a> with the mirror in <code>FEED</code>:',
+		'use_key': 'Import the signing key from this site, not from the mirror.',
 	},
 	'zh-cn': {
 		'title': 'OpenWrt 软件源',
 		'subtitle': 'dae、honk 及其 LuCI 界面的 apk 软件包，适用于 OpenWrt 25.12 及以上版本。',
 		'nav_guide': '说明',
+		'nav_mirror': '镜像',
 		'nav_files': '文件',
 		'language': '语言',
 		'theme': '浅色或深色',
@@ -137,11 +149,21 @@ TEXT = {
 		'all_files': '全部文件',
 		'source': '源代码',
 		'thanks': '镜像服务器由 <a href="{gentoozh}">gentoo-zh</a> 提供',
+		'mirror_title': '镜像本源',
+		'mirror_subtitle': '用 rsync 同步本源，通过 HTTP(S) 提供。软件包和索引均已签名，路由器用同一公钥验证。',
+		'sync': '同步',
+		'sync_note': '<code>--delay-updates</code>和<code>--delete-delay</code>保证索引与软件包一致。每几小时同步一次即可。',
+		'serve': '提供',
+		'serve_note': '原样提供该目录，路由器访问<code>&lt;series&gt;/packages/&lt;arch&gt;/</code>和<code>&lt;series&gt;/kmods/&lt;release&gt;/&lt;target&gt;/&lt;subtarget&gt;/</code>。',
+		'use': '使用',
+		'use_note': '按<a href="./">说明</a>操作，<code>FEED</code>改为镜像地址：',
+		'use_key': '签名公钥请从本站导入，不要从镜像导入。',
 	},
 	'zh-tw': {
 		'title': 'OpenWrt 軟體源',
 		'subtitle': 'dae、honk 及其 LuCI 介面的 apk 套件，適用於 OpenWrt 25.12 以上版本。',
 		'nav_guide': '說明',
+		'nav_mirror': '鏡像',
 		'nav_files': '檔案',
 		'language': '語言',
 		'theme': '淺色或深色',
@@ -188,6 +210,15 @@ TEXT = {
 		'all_files': '全部檔案',
 		'source': '原始碼',
 		'thanks': '鏡像伺服器由 <a href="{gentoozh}">gentoo-zh</a> 提供',
+		'mirror_title': '鏡像本源',
+		'mirror_subtitle': '用 rsync 同步本源，透過 HTTP(S) 提供。套件和索引均已簽章，路由器以同一把公鑰驗證。',
+		'sync': '同步',
+		'sync_note': '<code>--delay-updates</code>和<code>--delete-delay</code>確保索引與套件一致。每幾小時同步一次即可。',
+		'serve': '提供',
+		'serve_note': '原樣提供該目錄，路由器存取<code>&lt;series&gt;/packages/&lt;arch&gt;/</code>和<code>&lt;series&gt;/kmods/&lt;release&gt;/&lt;target&gt;/&lt;subtarget&gt;/</code>。',
+		'use': '使用',
+		'use_note': '依<a href="./">說明</a>操作，<code>FEED</code>改為鏡像位址：',
+		'use_key': '簽章公鑰請從本站匯入，不要從鏡像匯入。',
 	},
 }
 
@@ -300,7 +331,7 @@ def tabs(name, legend, options):
 	return f'<fieldset class="choice"><legend>{legend}</legend><div class="tabs">{radios}</div></fieldset>'
 
 
-def render(lang, html_lang, t, builds, base):
+def texts(lang, t):
 	fill = {
 		'gentoozh': GENTOOZH[lang],
 		'date': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d'),
@@ -312,7 +343,14 @@ def render(lang, html_lang, t, builds, base):
 	T = {k: v.format(**fill) if isinstance(v, str) else v for k, v in t.items()}
 	if lang.startswith('zh'):
 		T = {k: CJK_CODE.sub(' ', v) if isinstance(v, str) else v for k, v in T.items()}
+	return T
 
+
+def heading(key, title):
+	return f'<h2 id="{key}">{title}<a class="anchor" href="#{key}" aria-hidden="true">#</a></h2>'
+
+
+def guide(lang, T, builds, base):
 	# The packages are shared by a release series (25.12), vmlinux-btf belongs
 	# to one release (25.12.6) and target
 	repo = lambda kmods: (
@@ -361,41 +399,9 @@ def render(lang, html_lang, t, builds, base):
 	errors = ''.join(f'<tr><td class="mono">{esc(e)}</td><td>{c}</td></tr>' for e, c in T['error_items'])
 	versions = ''.join(f'<tr><td>{esc(v)}</td><td>{status}</td></tr>' for v, status in T['version_rows'])
 	sections = [('versions', T['versions']), ('install', T['install']), ('errors', T['errors'])]
-	h2 = {key: f'<h2 id="{key}">{title}<a class="anchor" href="#{key}" aria-hidden="true">#</a></h2>' for key, title in sections}
-	outline = ''.join(f'<li><a href="#{key}">{title}</a></li>' for key, title in sections)
-	languages = ''.join(
-		f'<li><a href="../{d}/" hreflang="{h}" lang="{h}"' + (' aria-current="true"' if d == lang else '') + f'>{esc(n)}</a></li>'
-		for d, h, n in LANGS)
-	alternates = '\n'.join(f'<link rel="alternate" hreflang="{h}" href="{base}/{d}/">' for d, h, _ in LANGS)
+	h2 = {key: heading(key, title) for key, title in sections}
 
-	return f'''<!doctype html>
-<html lang="{html_lang}">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>{T["title"]} · daeuniverse</title>
-<meta name="description" content="{T["subtitle"]}">
-<link rel="icon" href="../assets/daeuniverse.png">
-<link rel="stylesheet" href="../assets/style.css">
-<script src="../assets/site.js"></script>
-{alternates}
-</head>
-<body>
-<header class="topbar">
-<a class="brand" href="./"><img src="../assets/daeuniverse.png" alt="" width="28" height="28">daeuniverse</a>
-<nav class="topbar-nav"><a class="button" href="./" aria-current="page">{T["nav_guide"]}</a><a class="button" href="../files/">{T["nav_files"]}</a></nav>
-<div class="topbar-actions">
-<details class="lang"><summary class="button square" aria-label="{T["language"]}" title="{T["language"]}">{icon("languages")}</summary><ul>{languages}</ul></details>
-<button class="button square theme-toggle" type="button" aria-label="{T["theme"]}" title="{T["theme"]}">{icon("moon", "icon-dark")}{icon("sun", "icon-light")}</button>
-<a class="button square" href="{GITHUB}" aria-label="GitHub" title="GitHub">{icon("github")}</a>
-</div>
-</header>
-<div class="page">
-<main class="article">
-<h1>{T["title"]}</h1>
-<p class="subtitle">{T["subtitle"]}</p>
-
+	return sections, f'''
 {h2["versions"]}
 <div class="table"><table class="stack"><thead><tr><th>{T["th_series"]}</th><th>{T["th_status"]}</th></tr></thead><tbody>{versions}</tbody></table></div>
 <p>{T["check"]}</p>
@@ -428,7 +434,77 @@ def render(lang, html_lang, t, builds, base):
 
 {h2["errors"]}
 <div class="table"><table class="stack"><thead><tr><th>{T["th_error"]}</th><th>{T["th_cause"]}</th></tr></thead><tbody>{errors}</tbody></table></div>
+'''
 
+
+def mirror(T, rsync):
+	sections = [('sync', T['sync']), ('serve', T['serve']), ('use', T['use'])]
+	return sections, f'''
+{heading("sync", T["sync"])}
+{code(f"rsync -av --delete-delay --delay-updates \\\n    {rsync}/ \\\n    /srv/mirror/openwrt-daeuniverse/", T)}
+<p>{T["sync_note"]}</p>
+
+{heading("serve", T["serve"])}
+<p>{T["serve_note"]}</p>
+
+{heading("use", T["use"])}
+<p>{T["use_note"]}</p>
+{code("FEED=https://mirror.example.org/openwrt-daeuniverse/${DISTRIB_RELEASE%.*}", T)}
+<p>{T["use_key"]}</p>
+'''
+
+
+# The pages of a language directory, in the order of the top bar: file name,
+# nav text, title and subtitle
+PAGES = [
+	('index.html', 'nav_guide', 'title', 'subtitle'),
+	('mirror.html', 'nav_mirror', 'mirror_title', 'mirror_subtitle'),
+]
+
+
+def page(lang, html_lang, T, base, pages, name, sections, body):
+	"""Wraps a page body in what every page shares: head, top bar, outline and
+	footer. pages are the file names this language has, name the current one."""
+	href = lambda file: './' if file == 'index.html' else file
+	_, _, title, subtitle = next(p for p in PAGES if p[0] == name)
+	nav = ''.join(
+		f'<a class="button" href="{href(file)}"' + (' aria-current="page"' if file == name else '') + f'>{T[text]}</a>'
+		for file, text, _, _ in PAGES if file in pages)
+	outline = ''.join(f'<li><a href="#{key}">{text}</a></li>' for key, text in sections)
+	path = '' if name == 'index.html' else name
+	languages = ''.join(
+		f'<li><a href="../{d}/{path}" hreflang="{h}" lang="{h}"' + (' aria-current="true"' if d == lang else '') + f'>{esc(n)}</a></li>'
+		for d, h, n in LANGS)
+	alternates = '\n'.join(f'<link rel="alternate" hreflang="{h}" href="{base}/{d}/{path}">' for d, h, _ in LANGS)
+
+	return f'''<!doctype html>
+<html lang="{html_lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{T[title]} · daeuniverse</title>
+<meta name="description" content="{T[subtitle]}">
+<link rel="icon" href="../assets/daeuniverse.png">
+<link rel="stylesheet" href="../assets/style.css">
+<script src="../assets/site.js"></script>
+{alternates}
+</head>
+<body>
+<header class="topbar">
+<a class="brand" href="./"><img src="../assets/daeuniverse.png" alt="" width="28" height="28">daeuniverse</a>
+<nav class="topbar-nav">{nav}<a class="button" href="../files/">{T["nav_files"]}</a></nav>
+<div class="topbar-actions">
+<details class="lang"><summary class="button square" aria-label="{T["language"]}" title="{T["language"]}">{icon("languages")}</summary><ul>{languages}</ul></details>
+<button class="button square theme-toggle" type="button" aria-label="{T["theme"]}" title="{T["theme"]}">{icon("moon", "icon-dark")}{icon("sun", "icon-light")}</button>
+<a class="button square" href="{GITHUB}" aria-label="GitHub" title="GitHub">{icon("github")}</a>
+</div>
+</header>
+<div class="page">
+<main class="article">
+<h1>{T[title]}</h1>
+<p class="subtitle">{T[subtitle]}</p>
+{body}
 <p class="edit"><a class="button" href="{SOURCE}">{icon("pen")}{T["edit"]}</a></p>
 </main>
 <nav class="outline" aria-label="{T["outline"]}"><ul>{outline}</ul></nav>
@@ -445,10 +521,17 @@ def render(lang, html_lang, t, builds, base):
 
 def main():
 	site, base = Path(sys.argv[1]), sys.argv[2].rstrip('/')
+	rsync = sys.argv[3].rstrip('/') if len(sys.argv) > 3 else ''
 	builds = read_builds(sys.stdin)
 	for lang, html_lang, _ in LANGS:
+		T = texts(lang, TEXT[lang])
+		bodies = {'index.html': guide(lang, T, builds, base)}
+		if rsync:
+			bodies['mirror.html'] = mirror(T, rsync)
 		(site / lang).mkdir(parents=True, exist_ok=True)
-		(site / lang / 'index.html').write_text(render(lang, html_lang, TEXT[lang], builds, base), encoding='utf-8')
+		for name, (sections, body) in bodies.items():
+			html_text = page(lang, html_lang, T, base, bodies, name, sections, body)
+			(site / lang / name).write_text(html_text, encoding='utf-8')
 	shutil.copytree(HERE / 'assets', site / 'assets', dirs_exist_ok=True)
 
 

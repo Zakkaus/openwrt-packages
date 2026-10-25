@@ -329,10 +329,10 @@ public-key.pem                                          key of every packages.ad
 `<series>` is `25.12`: one packages directory serves every point release of
 the series, on OpenWrt and on ImmortalWrt, while `vmlinux-btf` is published per
 release and target because it only installs on that exact kernel. A device adds
-the repositories with the `@daeuniverse` tag, so their packages are only
-installed when named (`apk add luci-app-dae@daeuniverse`) and never replace a
-system package of the same name — ImmortalWrt ships its own `dae` and
-`luci-app-dae`:
+the repositories with the `@daeuniverse` tag, so a package the system also has
+is only taken from the feed when it is named with the tag
+(`apk add dae@daeuniverse`), and the feed never replaces a system package of
+the same name — ImmortalWrt ships its own `dae` and `luci-app-dae`:
 
 ```sh
 wget -O /etc/apk/keys/daeuniverse.pem https://openwrt.daeuniverse.org/public-key.pem
@@ -364,6 +364,10 @@ official OpenWrt, dae and honk also need the `vmlinux-btf` of the device's
 target, so only those five targets are supported there; ImmortalWrt only needs
 the architecture to match (for example `qualcommax` or `mediatek/mt7622` as
 `aarch64_cortex-a53`). 32-bit ARM and MIPS are not supported on either.
+
+Mirroring: `rsync://openwrt.daeuniverse.org/openwrt-daeuniverse/`, see
+`<lang>/mirror.html`. Devices import the key from this site and set `FEED` to
+the mirror.
 
 ## Architectures
 
@@ -635,7 +639,8 @@ job logs), the packages are pinned to the upstream releases above, and the
   `luci-lib-daeuniverse`): service status, a configuration editor that follows
   `include`, and the log, in English and Chinese.
 * A signed apk package feed at <https://openwrt.daeuniverse.org/> with a
-  landing page; the GitHub Releases and the feed upload can each be turned off.
+  landing page, and a page on mirroring it with rsync; the GitHub Releases and
+  the feed upload can each be turned off.
 * `vmlinux-btf` is locked to the exact kernel it was built for and provides
   `kmod-xdp-sockets-diag`, so `apk add dae` works on official OpenWrt; the
   preinst/postinst generation check is gone.
