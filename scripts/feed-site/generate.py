@@ -68,7 +68,7 @@ TEXT = {
 		'install': 'Install',
 		'key': 'Import the signing key',
 		'repos': 'Add the repositories',
-		'repos_note': 'With the <code>@daeuniverse</code> tag, a package the system also has is only taken from this feed when it is named with the tag, so system packages of the same name stay in place.',
+		'repos_note': 'A package the system also has is only taken from this feed when named with the <code>@daeuniverse</code> tag, so system packages of the same name stay in place.',
 		'add': 'Install the packages',
 		'add_note': 'Without LuCI, leave out the <code>luci-</code> packages.',
 		'start': 'Enable the service',
