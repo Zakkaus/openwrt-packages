@@ -28,7 +28,7 @@
 
 		// Close the language menu on a click elsewhere, like a native menu
 		document.addEventListener('click', event => {
-			for (const menu of document.querySelectorAll('details[open]'))
+			for (const menu of document.querySelectorAll('details.lang[open]'))
 				if (!menu.contains(event.target))
 					menu.open = false;
 		});
