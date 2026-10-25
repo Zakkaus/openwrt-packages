@@ -1,8 +1,9 @@
 # openwrt-packages
 
-Builds a BTF-enabled `vmlinux` for OpenWrt targets and builds the `vmlinux-btf`,
-`dae` and `honk` packages for the same architectures, then publishes everything
-in a single GitHub Release per kernel version. The same packages, plus LuCI
+Builds a BTF-enabled `vmlinux` and the `vmlinux-btf` package for every OpenWrt
+target of the [supported architectures](#architectures), and the `dae` and
+`honk` packages for those architectures, then publishes everything in a single
+GitHub Release per kernel version. The same packages, plus LuCI
 apps for dae and honk, are published as a signed apk
 [package feed](#package-feed) at <https://openwrt.daeuniverse.org/>.
 
@@ -73,8 +74,8 @@ jobs do. Deselecting it in `.config` drops dae as well on official OpenWrt.
 
 | Asset | Contents | Built from |
 |---|---|---|
-| `<openwrt_version>-vmlinux-<openwrt_arch>-<kernel_version>.tar.xz` | one file named `vmlinux`: the detached BTF blob (the same file the upstream package installs) | `src/shadow_btf_*.c` compiled against the SDK's prepared kernel headers with the SDK toolchain, then `pahole` |
-| `<openwrt_version>-vmlinux-btf-<openwrt_arch>-<kernel_version>.apk` | OpenWrt package `vmlinux-btf` (version = kernel version), installing `/usr/lib/debug/boot/vmlinux`, the `vmlinux-<kernel release>` symlink and `/usr/share/vmlinux-btf/version`; it only installs on the exact kernel it was built for and provides `kmod-xdp-sockets-diag` | the same blob, packaged with [`vmlinux-btf/Makefile`](vmlinux-btf/Makefile) |
+| `<openwrt_version>-vmlinux-<target>-<subtarget>-<kernel_version>.tar.xz` | one file named `vmlinux`: the detached BTF blob (the same file the upstream package installs) | `src/shadow_btf_*.c` compiled against the SDK's prepared kernel headers with the SDK toolchain, then `pahole` |
+| `<openwrt_version>-vmlinux-btf-<target>-<subtarget>-<kernel_version>.apk` | OpenWrt package `vmlinux-btf` (version = kernel version), installing `/usr/lib/debug/boot/vmlinux`, the `vmlinux-<kernel release>` symlink and `/usr/share/vmlinux-btf/version`; it only installs on the exact kernel it was built for and provides `kmod-xdp-sockets-diag` | the same blob, packaged with [`vmlinux-btf/Makefile`](vmlinux-btf/Makefile) |
 | `<openwrt_version>-dae-2.1.1-<openwrt_arch>.apk` | OpenWrt package `dae` 2.1.1, installing `/usr/bin/dae`, a procd init script and `/etc/config/dae` | [daeuniverse/dae](https://github.com/daeuniverse/dae) tag `v2.1.1`, built by [`dae/Makefile`](dae/Makefile) |
 | `<openwrt_version>-honk-0.1.0_beta1-<openwrt_arch>.apk` | OpenWrt package `honk` 0.1.0_beta1, installing `/usr/bin/honk-core` (full feature set with the embedded doona UI), a procd init script and `/etc/config/honk` | [daeuniverse/honk](https://github.com/daeuniverse/honk) tag `v0.1.0-beta.1`, built by [`honk/Makefile`](honk/Makefile) |
 | `public-key.pem` | the public key that verifies the signature of every `.apk` asset of the release | [`keys/public-key.pem`](keys/public-key.pem), see [Verifying the packages](#verifying-the-packages) |
@@ -120,7 +121,7 @@ publishing anything.
 3. The result appears under **Releases**, tagged
    `openwrt-<openwrt_version>-<kernel_version>-<date>` — for example
    `openwrt-25.12.5-6.12.94-20261024`. `<date>` is the UTC date of the run, the
-   same for every kernel version it publishes. All architectures of one kernel
+   same for every kernel version it publishes. All targets of one kernel
    version are collected in that single release; re-running the workflow
    overwrites the existing assets instead of failing, and an existing
    tag/release is reused (a second run on the same UTC day publishes into that
@@ -139,7 +140,7 @@ creates), so the archive can be skipped entirely:
 # matter, apk matches the key itself rather than the file name
 cp public-key.pem /etc/apk/keys/
 
-apk add 25.12.5-vmlinux-btf-aarch64_cortex-a76-6.12.94.apk
+apk add 25.12.6-vmlinux-btf-bcm27xx-bcm2712-6.12.112.apk
 ```
 
 The package records the kernel version it was built for in
@@ -191,7 +192,7 @@ needed:
 
 ```sh
 cp public-key.pem /etc/apk/keys/
-apk add 25.12.5-vmlinux-btf-aarch64_cortex-a76-6.12.94.apk
+apk add 25.12.6-vmlinux-btf-bcm27xx-bcm2712-6.12.112.apk
 ```
 
 The file name in `/etc/apk/keys/` does not matter: apk identifies a key by its
@@ -362,9 +363,9 @@ Supported versions:
 
 The packages are built for the [architectures](#architectures) below. On
 official OpenWrt, dae and honk also need the `vmlinux-btf` of the device's
-target, so only those five targets are supported there; ImmortalWrt only needs
-the architecture to match (for example `qualcommax` or `mediatek/mt7622` as
-`aarch64_cortex-a53`). 32-bit ARM and MIPS are not supported on either.
+target, which is built for every target of those architectures; ImmortalWrt
+only needs the architecture to match. 32-bit ARM and MIPS are not supported on
+either.
 
 Mirroring: `rsync://openwrt.daeuniverse.org/openwrt-daeuniverse/`, see
 `<lang>/mirror.html`. Devices import the key from this site and set `FEED` to
@@ -372,10 +373,11 @@ the mirror.
 
 ## Architectures
 
-One representative target/subtarget per OpenWrt architecture (`arch_packages`).
-32-bit ARM and MIPS are not built: dae and honk are not offered for them.
+OpenWrt architectures (`arch_packages`), with the target/subtarget whose SDK
+builds dae and honk for them. 32-bit ARM and MIPS are not built: dae and honk
+are not offered for them.
 
-| OpenWrt arch | target/subtarget | kernel arch |
+| OpenWrt arch | dae and honk built with | kernel arch |
 |---|---|---|
 | `x86_64` | `x86/64` | x86_64 |
 | `aarch64_generic` | `armsr/armv8` | arm64 |
@@ -383,17 +385,18 @@ One representative target/subtarget per OpenWrt architecture (`arch_packages`).
 | `aarch64_cortex-a72` | `bcm27xx/bcm2711` | arm64 |
 | `aarch64_cortex-a76` | `bcm27xx/bcm2712` | arm64 |
 
-Several targets share the same `arch_packages` (for `aarch64_cortex-a53` also
-`qualcommax/ipq807x`, `sunxi/cortexa53`, `mvebu/cortexa53`, …), so the list picks
-one each. If a device needs a different kernel `.config`, replace the row with
-another target/subtarget that reports the same `arch_packages` — the workflow
-verifies `arch_packages` against `profiles.json` and fails fast if it does not
-match.
+The BTF and `vmlinux-btf` are built for every target of these architectures
+that the release lists in `.targets.json` (18 on 25.12, for example
+`qualcommax/ipq807x` and `rockchip/armv8`), one job per target with its own SDK:
+the BTF follows the kernel `.config` of the target, so struct offsets that dae
+relies on (such as `task_struct.mm`) differ between targets of one
+architecture. A target OpenWrt adds is picked up without a workflow change; the
+workflow checks `arch_packages` against `profiles.json` and fails fast if they
+disagree.
 
-The packages are built for every row of that table, one job per architecture,
-using the SDK of that architecture (the same matrix drives the kernel, the BTF
-package and the userspace builds). `vmlinux-btf` only wraps the blob that the
-`build` job produced for that architecture. `dae` is plain Go, so it only needs
+dae and honk only depend on the architecture, so they are built once per row of
+the table, with the SDK of that target. `vmlinux-btf` only wraps the blob that
+the `build` job produced for its target. `dae` is plain Go, so it only needs
 `GOOS=linux` plus the right `GOARCH`/`GOAMD64`/`GOARM64`, and it is tuned per
 architecture: `amd64` for `x86_64`, `arm64` with `GOARM64=v8.0` for the generic
 and Cortex-A53/A72 targets, and `GOARM64=v8.2,lse` for `aarch64_cortex-a76`
@@ -407,8 +410,8 @@ doona UI, so the dashboard needs no runtime download or frontend build.
 
 ```mermaid
 flowchart LR
-  P["prepare<br/>resolve SDK, kernel version,<br/>arch_packages and build matrix"]
-  K["build (x86_64, aarch64_generic, aarch64_cortex-a53/a72/a76)<br/>SDK kernel headers + SDK toolchain<br/>stubs → DWARF → pahole → BTF blob<br/>+ vmlinux-btf package"]
+  P["prepare<br/>resolve targets, SDKs, kernel version<br/>and arch_packages"]
+  K["build (one per target)<br/>SDK kernel headers + SDK toolchain<br/>stubs → DWARF → pahole → BTF blob<br/>+ vmlinux-btf package"]
   D["dae 2.1.1 (one per OpenWrt arch)<br/>Go, clang for the eBPF objects"]
   H["honk 0.1.0_beta1 (one per OpenWrt arch)<br/>Rust, full features + embedded doona UI,<br/>eBPF object + BoringSSL via the SDK gcc/g++"]
   L["luci<br/>the LuCI apps, built once (all architectures)"]
@@ -427,7 +430,8 @@ flowchart LR
   L --> F
 ```
 
-**prepare** — reads
+**prepare** — lists the targets of the supported architectures from
+`releases/<version>/.targets.json`, reads
 `releases/<version>/targets/<target>/<subtarget>/profiles.json` for
 `arch_packages` (validated) and `linux_kernel.version`, and finds the SDK archive
 of each target in the download index.
@@ -439,7 +443,7 @@ same release tree, so only the host differs, which makes the mirror both a
 substitute when the official host is unreachable or slow and the place that
 still serves a release the official tree has rotated into
 `archive.openwrt.org`. `prepare` records the host that serves the release and
-the other one as fallback in the matrix; each job downloads the SDK with
+the other one as fallback; each job downloads the SDK with
 [`scripts/fetch-openwrt-sdk.sh`](scripts/fetch-openwrt-sdk.sh), which tries the
 official host first, then the mirror, and verifies every download against the
 `sha256sums` published in the same directory (a mismatch or a truncated transfer
@@ -449,7 +453,7 @@ request and lists the SDK URL, with its fallback, of every target in the job
 summary, and the script prints the tarball, the `sha256sums` file it checked it
 against and the host the file finally came from.
 
-**build** (one job per architecture, does not depend on the other jobs) —
+**build** (one job per target, does not depend on the other jobs) —
 downloads and extracts the SDK, then takes from it:
 
 * the kernel tree OpenWrt already prepared (`build_dir/*/linux-*/linux-*/`, with
@@ -582,8 +586,6 @@ job logs), the packages are pinned to the upstream releases above, and the
   socket and a few private structs when the target config and headers allow it.
   A program that needs a type nobody includes will not find it — extend the
   stubs (and keep them in sync with upstream) if that happens.
-* **One subtarget per architecture** is built (see above); the prepared kernel
-  tree of that subtarget is the one used.
 * **`pahole` comes from the runner** (`dwarves` on Ubuntu 24.04). The workflow
   prefers `--btf_encode_detached` and falls back to `-J` + `objcopy` when the
   installed pahole is too old for it.
@@ -622,15 +624,13 @@ job logs), the packages are pinned to the upstream releases above, and the
   The signature covers the package, not the `.tar.xz` archive next to it: those
   are published with their `.sha256` checksum. `.ipk` packages are not built or
   published.
-* **Time and cost.** Each of the five BTF jobs takes a few minutes, and each dae
-  and honk job downloads the ~250 MB SDK plus its language toolchain. They all
-  run in parallel, so on plans with a low limit of concurrent jobs the runs will
-  queue — trim the target list to what you need.
-* **A failing userspace build does not block the release** — the kernel assets
-  are published anyway and the missing `dae`/`honk` assets are simply absent
-  from that release. `vmlinux-btf` is built in the kernel job itself, so a
-  packaging failure fails that architecture's job and the release is not
-  published.
+* **Time and cost.** Each BTF job (one per target, 18 on 25.12) takes a few
+  minutes, mostly the ~250 MB SDK download, and each dae and honk job downloads
+  the SDK plus its language toolchain. They all run in parallel, so on plans
+  with a low limit of concurrent jobs the runs will queue.
+* **A failing build blocks publishing** — the release and the feed are only
+  written when every BTF, dae and honk job (and, for the feed, the LuCI job)
+  succeeded, so a run never publishes a partial set.
 
 ## Changelog
 
@@ -642,6 +642,8 @@ job logs), the packages are pinned to the upstream releases above, and the
 * A signed apk package feed at <https://openwrt.daeuniverse.org/> with a
   landing page, a page on mirroring it with rsync and a thanks page; the GitHub
   Releases and the feed upload can each be turned off.
+* `vmlinux-btf` is built for every target of the supported architectures
+  (Qualcomm, Rockchip, MediaTek MT7622 and the rest), not one per architecture.
 * `vmlinux-btf` is locked to the exact kernel it was built for and provides
   `kmod-xdp-sockets-diag`, so `apk add dae` works on official OpenWrt; the
   preinst/postinst generation check is gone.
