@@ -28,7 +28,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=dae
 PKG_VERSION:=$(if $(DAE_VERSION),$(DAE_VERSION),2.1.1)
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_LICENSE:=AGPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
@@ -52,16 +52,18 @@ define Package/dae
   LICENSE:=AGPL-3.0-only
   # dae is a static Go binary, so it needs no libraries at runtime. Its eBPF
   # datapath attaches TC programs to the LAN/WAN interfaces and creates a veth
-  # pair plus the daens namespace, hence the kernel modules below. The geo
-  # packages ship the dat files dae looks up as geoip:/geosite:; this package
-  # only links them into /usr/share/dae.
+  # pair plus the daens namespace, hence the kernel modules below; its CO-RE
+  # programs need the kernel's BTF, which vmlinux-btf installs on official
+  # OpenWrt and vmlinux-btf-builtin stands in for where the kernel has its own.
+  # The geo packages ship the dat files dae looks up as geoip:/geosite:; this
+  # package only links them into /usr/share/dae.
   DEPENDS:=+ca-bundle +kmod-sched-core +kmod-sched-bpf +kmod-veth \
-           +kmod-xdp-sockets-diag +v2ray-geoip +v2ray-geosite
+           +vmlinux-btf +v2ray-geoip +v2ray-geosite
 endef
 
 define Package/dae/description
  dae is an eBPF-based transparent proxy for Linux. Its datapath uses CO-RE
- eBPF programs, so the running kernel needs BTF; install vmlinux-btf for that.
+ eBPF programs, so the running kernel needs BTF, which vmlinux-btf provides.
 endef
 
 define Build/Prepare

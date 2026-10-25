@@ -35,6 +35,7 @@ comes from.
 .
 ├── .github/workflows/build-vmlinux-btf.yml  # the only workflow
 ├── vmlinux-btf/  # OpenWrt package "vmlinux-btf": Makefile (prebuilt blob)
+├── vmlinux-btf-builtin/  # OpenWrt package "vmlinux-btf-builtin": Makefile (empty)
 ├── dae/          # OpenWrt package "dae":  Makefile + build.sh + files/ (init, UCI)
 ├── honk/         # OpenWrt package "honk": Makefile + build.sh + files/ (init, UCI, config)
 ├── luci-lib-daeuniverse/  # the LuCI page shared by both apps, and its translations
@@ -64,18 +65,20 @@ git clone --recurse-submodules --branch v2.1.1 https://github.com/daeuniverse/da
 git clone --branch v0.1.0-beta.1 https://github.com/daeuniverse/honk honk/src
 ```
 
-`./scripts/feeds install dae` also installs `vmlinux-btf`, the provider of
-dae's `kmod-xdp-sockets-diag`, and `make package/dae/compile` builds it first.
-It needs the blob as `VMLINUX_BTF_SRC`; without one, pass
-`CONFIG_PACKAGE_vmlinux-btf=` on the `make` command line, as the dae and LuCI
-jobs do. Deselecting it in `.config` drops dae as well on official OpenWrt.
+`./scripts/feeds install dae` (or `honk`) also installs `vmlinux-btf`, which
+both depend on, and `make package/dae/compile` builds it first. It needs the
+blob as `VMLINUX_BTF_SRC`; without one, pass `CONFIG_PACKAGE_vmlinux-btf=` on
+the `make` command line, as the dae, honk and LuCI jobs do. For a kernel with
+its own BTF, select `vmlinux-btf-builtin` instead, which keeps `vmlinux-btf`
+out.
 
 ## What it produces
 
 | Asset | Contents | Built from |
 |---|---|---|
 | `<openwrt_version>-vmlinux-<target>-<subtarget>-<kernel_version>.tar.xz` | one file named `vmlinux`: the detached BTF blob (the same file the upstream package installs) | `src/shadow_btf_*.c` compiled against the SDK's prepared kernel headers with the SDK toolchain, then `pahole` |
-| `<openwrt_version>-vmlinux-btf-<target>-<subtarget>-<kernel_version>.apk` | OpenWrt package `vmlinux-btf` (version = kernel version), installing `/usr/lib/debug/boot/vmlinux`, the `vmlinux-<kernel release>` symlink and `/usr/share/vmlinux-btf/version`; it only installs on the exact kernel it was built for and provides `kmod-xdp-sockets-diag` | the same blob, packaged with [`vmlinux-btf/Makefile`](vmlinux-btf/Makefile) |
+| `<openwrt_version>-vmlinux-btf-<target>-<subtarget>-<kernel_version>.apk` | OpenWrt package `vmlinux-btf` (version = kernel version), installing `/usr/lib/debug/boot/vmlinux`, the `vmlinux-<kernel release>` symlink and `/usr/share/vmlinux-btf/version`; it only installs on the exact kernel it was built for | the same blob, packaged with [`vmlinux-btf/Makefile`](vmlinux-btf/Makefile) |
+| `vmlinux-btf-builtin-<version>.apk` | OpenWrt package `vmlinux-btf-builtin`, empty and architecture independent: provides `vmlinux-btf` on a kernel with its own BTF (ImmortalWrt), where `vmlinux-btf` does not install | [`vmlinux-btf-builtin/Makefile`](vmlinux-btf-builtin/Makefile) |
 | `<openwrt_version>-dae-2.1.1-<openwrt_arch>.apk` | OpenWrt package `dae` 2.1.1, installing `/usr/bin/dae`, a procd init script and `/etc/config/dae` | [daeuniverse/dae](https://github.com/daeuniverse/dae) tag `v2.1.1`, built by [`dae/Makefile`](dae/Makefile) |
 | `<openwrt_version>-honk-0.1.0_beta1-<openwrt_arch>.apk` | OpenWrt package `honk` 0.1.0_beta1, installing `/usr/bin/honk-core` (full feature set with the embedded doona UI), a procd init script and `/etc/config/honk` | [daeuniverse/honk](https://github.com/daeuniverse/honk) tag `v0.1.0-beta.1`, built by [`honk/Makefile`](honk/Makefile) |
 | `public-key.pem` | the public key that verifies the signature of every `.apk` asset of the release | [`keys/public-key.pem`](keys/public-key.pem), see [Verifying the packages](#verifying-the-packages) |
@@ -151,11 +154,14 @@ self-built kernel — instead of installing a blob whose CO-RE relocations would
 resolve the wrong types. The symlink it ships is therefore always the one
 `uname -r` names.
 
-It also provides `kmod-xdp-sockets-diag`, which dae depends on. Official
-OpenWrt kernels have neither BTF nor that module, so there apk installs
-`vmlinux-btf` to satisfy the dependency (the provide is virtual and marked as
-the default provider). ImmortalWrt, whose kernels have both, ships a real
-package of that name, and apk takes a real package over any provider.
+dae and honk depend on `vmlinux-btf`. On a kernel with its own BTF
+(`/sys/kernel/btf/vmlinux`, e.g. ImmortalWrt), where `vmlinux-btf` does not
+install, the empty `vmlinux-btf-builtin` satisfies the dependency: it provides
+`vmlinux-btf` with a priority, and apk takes the real package wherever it
+installs, and `apk upgrade vmlinux-btf-builtin` replaces this one with it once
+the real one becomes available. Its pre-install check reports a kernel without
+BTF (the kmods repository is missing) with that command; apk does not stop at a failed check,
+so the init scripts check again and log the same.
 
 The `dae` and `honk` assets are OpenWrt packages as well:
 
@@ -247,15 +253,14 @@ Kernel modules are declared as package dependencies:
 
 | Package | Why |
 |---|---|
-| `kmod-sched-core`, `kmod-sched-bpf`, `kmod-veth`, `kmod-xdp-sockets-diag` | TC-bpf datapath, `dae0` veth pair and the socket/XDP diagnostics used by dae (on official OpenWrt, `vmlinux-btf` provides the last one) |
+| `kmod-sched-core`, `kmod-sched-bpf`, `kmod-veth` | TC-bpf datapath and `dae0` veth pair of dae |
 | `kmod-veth`, `kmod-sched-core`, `kmod-sched-bpf` | the same TC datapath and `dae0` link pair for honk |
 | `kmod-nft-core`, `kmod-nft-queue`, `kmod-nfnetlink-queue`, `kmod-nf-conntrack` | honk's NFQUEUE staging for ambiguous LAN UDP first packets |
 
-BTF is still required by both eBPF engines; install the `vmlinux-btf` package of
-the running kernel (or another BTF blob at `/usr/lib/debug/boot/vmlinux`). honk
-0.1.0 also reads the external BTF of OpenWrt kernels when sysfs has no
-`vmlinux`. dae needs Linux 5.17 or newer and honk's eBPF backend 6.12 or
-newer; OpenWrt 25.12 runs 6.12.
+Both eBPF engines need BTF, so both depend on `vmlinux-btf` (see above). dae
+reads `/usr/lib/debug/boot/vmlinux-<kernel release>` when sysfs has no
+`vmlinux`, honk `/usr/lib/debug/boot/vmlinux`. dae needs Linux 5.17 or newer
+and honk 6.12 or newer; OpenWrt 25.12 runs 6.12.
 
 ### honk's embedded UI
 
@@ -323,7 +328,7 @@ repository, with a landing page (English, Simplified and Traditional Chinese)
 that walks through the setup. The layout:
 
 ```
-<series>/packages/<openwrt_arch>/                       dae, honk, the LuCI apps
+<series>/packages/<openwrt_arch>/                       dae, honk, the LuCI apps, vmlinux-btf-builtin
 <series>/kmods/<release>/<target>/<subtarget>/          vmlinux-btf
 public-key.pem                                          key of every packages.adb
 ```
@@ -345,21 +350,23 @@ cat > /etc/apk/repositories.d/daeuniverse.list <<EOF
 @daeuniverse $FEED/kmods/$DISTRIB_RELEASE/$DISTRIB_TARGET/packages.adb
 EOF
 apk update
-apk add dae@daeuniverse luci-app-dae@daeuniverse vmlinux-btf@daeuniverse
+apk add dae@daeuniverse luci-app-dae@daeuniverse
 ```
 
-(or `honk` and `luci-app-honk`). ImmortalWrt leaves out the `kmods` line and
-`vmlinux-btf`. A dependency the system also has comes from the system unless
-it is named with the tag, so the service is named too: ImmortalWrt would
-otherwise install its own, older `dae` for `luci-app-dae`. On official OpenWrt
-`vmlinux-btf` is named because honk, unlike dae, does not pull it in.
+(or `honk` and `luci-app-honk`). ImmortalWrt leaves out the `kmods` line.
+A dependency the system also has comes from the system unless it is named with
+the tag, so the service is named too: ImmortalWrt would otherwise install its
+own, older `dae` for `luci-app-dae`. `vmlinux-btf` comes along: from the kmods
+repository on official OpenWrt, as `vmlinux-btf-builtin` on ImmortalWrt.
 Supported versions:
 
-| Version | Status |
-|---|---|
-| 25.12 | Supported on OpenWrt and ImmortalWrt. |
-| 24.10 | Not supported: opkg has no repository tags, so the feed would replace packages of the same name, and ImmortalWrt 24.10 ships its own dae. |
-| 23.05 and older | Not supported: the kernel is older than the 5.17 that dae needs. |
+| Version | Kernel | Status |
+|---|---|---|
+| 25.12 | 6.12 | Supported on OpenWrt and ImmortalWrt. |
+| 24.10 | 6.6 | Not supported: opkg has no repository tags, so the feed would replace packages of the same name, and ImmortalWrt 24.10 ships its own dae. The kernel is older than honk needs. |
+| 23.05 and older | ≤ 5.15 | Not supported: the kernel is older than dae and honk need. |
+
+dae needs kernel 5.17 or later, honk 6.12 or later.
 
 The packages are built for the [architectures](#architectures) below. On
 official OpenWrt, dae and honk also need the `vmlinux-btf` of the device's
@@ -414,7 +421,7 @@ flowchart LR
   K["build (one per target)<br/>SDK kernel headers + SDK toolchain<br/>stubs → DWARF → pahole → BTF blob<br/>+ vmlinux-btf package"]
   D["dae 2.1.1 (one per OpenWrt arch)<br/>Go, clang for the eBPF objects"]
   H["honk 0.1.0_beta1 (one per OpenWrt arch)<br/>Rust, full features + embedded doona UI,<br/>eBPF object + BoringSSL via the SDK gcc/g++"]
-  L["luci<br/>the LuCI apps, built once (all architectures)"]
+  L["luci<br/>the LuCI apps and vmlinux-btf-builtin,<br/>built once (all architectures)"]
   R["release<br/>group by kernel version,<br/>one Release per version"]
   F["feed<br/>signed apk repositories<br/>+ landing page on the mirror"]
   P --> K
@@ -424,6 +431,7 @@ flowchart LR
   K --> R
   D --> R
   H --> R
+  L --> R
   K --> F
   D --> F
   H --> F
@@ -527,9 +535,10 @@ are added to every group, since they do not belong to one kernel version.
 Creating the tag is done with `gh`, pointing it at the commit the workflow ran
 on.
 
-**luci** — builds `luci-lib-daeuniverse`, `luci-app-dae` and `luci-app-honk`
-with the x86_64 SDK and its `base` and `luci` feeds. They contain only
-JavaScript, JSON and translations, so one build serves every architecture.
+**luci** — builds `luci-lib-daeuniverse`, `luci-app-dae`, `luci-app-honk` and
+`vmlinux-btf-builtin` with the x86_64 SDK and its `base` and `luci` feeds. They
+contain only JavaScript, JSON, translations or nothing at all, so one build
+serves every architecture.
 
 **feed** — runs when the repository has a mirror configured
 (`vars.MIRROR_HOST`, see the job's comment for the other variables and the
@@ -608,8 +617,8 @@ job logs), the packages are pinned to the upstream releases above, and the
   optional extras.
 * **`vmlinux-btf` is locked to one kernel.** It depends on the exact `kernel`
   package of the SDK it was built with, so it does not install on another
-  release, target or a self-built kernel (apk reports
-  `vmlinux-btf breaks: kernel`); the installed version is readable from
+  release, target or a self-built kernel (apk reports that the `kernel`
+  package breaks `vmlinux-btf`); the installed version is readable from
   `/usr/share/vmlinux-btf/version`.
 * **dae** is a static Go binary with no libc dependency at all, one package per
   architecture, version `2.1.1`.
@@ -646,9 +655,10 @@ job logs), the packages are pinned to the upstream releases above, and the
   Releases and the feed upload can each be turned off.
 * `vmlinux-btf` is built for every target of the supported architectures
   (Qualcomm, Rockchip, MediaTek MT7622 and the rest), not one per architecture.
-* `vmlinux-btf` is locked to the exact kernel it was built for and provides
-  `kmod-xdp-sockets-diag`, so `apk add dae` works on official OpenWrt; the
-  preinst/postinst generation check is gone.
+* `vmlinux-btf` is locked to the exact kernel it was built for; the
+  preinst/postinst generation check is gone. dae and honk depend on it, and
+  `vmlinux-btf-builtin` stands in for it on a kernel with its own BTF
+  (ImmortalWrt).
 * dae reloads with `SIGUSR1` (it ignores `SIGHUP`, so reloads did nothing
   before); `reload` follows the `enabled` switch and `config_file`; turning
   dae or honk on turns the other off.

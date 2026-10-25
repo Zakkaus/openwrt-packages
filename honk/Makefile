@@ -37,7 +37,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=$(if $(HONK_VERSION),$(HONK_VERSION),0.1.0_beta1)
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # Upstream release the sources are checked out from. honk's build script derives
 # the version it embeds from the tag in GITHUB_REF, so build.sh exports it.
@@ -61,16 +61,17 @@ define Package/honk
   # honk-core is linked against the musl and the C++ runtime of OpenWrt. Its
   # eBPF datapath needs TC-bpf and a veth pair plus the daens namespace, and
   # its NFQUEUE staging uses nftables queue expressions over nfnetlink_queue.
-  # The geo packages ship the dat files; this package links them into
-  # /usr/share/honk, which honk searches before the dae locations.
+  # Its BTF comes from vmlinux-btf, as for dae. The geo packages ship the dat
+  # files; this package links them into /usr/share/honk, which honk searches
+  # before the dae locations.
   DEPENDS:=+libstdcpp +kmod-veth +kmod-sched-core +kmod-sched-bpf \
            +kmod-nft-core +kmod-nft-queue +kmod-nfnetlink-queue \
-           +kmod-nf-conntrack +v2ray-geoip +v2ray-geosite
+           +kmod-nf-conntrack +vmlinux-btf +v2ray-geoip +v2ray-geosite
 endef
 
 define Package/honk/description
  honk is an eBPF transparent proxy engine. honk-core embeds its eBPF object and
- needs kernel BTF for CO-RE relocations; install vmlinux-btf for that. This
+ needs kernel BTF for CO-RE relocations, which vmlinux-btf provides. This
  build enables the Clash API, the native API and the embedded doona dashboard
  (native-ui), which is served at /ui on the native API listener.
 endef

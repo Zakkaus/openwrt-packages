@@ -46,6 +46,13 @@ start_service() {
 		return 1
 	fi
 
+	# apk does not stop at the failed check of vmlinux-btf-builtin, so a kernel
+	# without BTF can still get here
+	if [ ! -e /sys/kernel/btf/vmlinux ] && [ ! -e /usr/lib/debug/boot/vmlinux ]; then
+		logger -t honk "the kernel has no BTF: add the kmods repository, then run 'apk update && apk upgrade vmlinux-btf-builtin'"
+		return 1
+	fi
+
 	# aya pins its maps below --bpf-pin-root (default /sys/fs/bpf), and OpenWrt
 	# does not mount bpffs by itself. BusyBox has no mountpoint applet, so look
 	# it up in /proc/mounts; a second mount would stack on the first. It is
