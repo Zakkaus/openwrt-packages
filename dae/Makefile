@@ -40,8 +40,8 @@ DAE_SRC:=$(PKG_DIR)/src
 
 # clang compiles the eBPF objects that bpf2go embeds, llvm-strip strips the
 # binary. The Go toolchain (>= the version in go.mod) has to be on PATH.
-DAE_CLANG:=$(shell command -v clang-15 2>/dev/null || command -v clang 2>/dev/null)
-DAE_STRIP:=$(shell command -v llvm-strip-15 2>/dev/null || command -v llvm-strip 2>/dev/null)
+DAE_CLANG:=$(shell command -v clang 2>/dev/null)
+DAE_STRIP:=$(shell command -v llvm-strip 2>/dev/null)
 
 define Package/dae
   SECTION:=net
