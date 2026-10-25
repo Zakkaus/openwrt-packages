@@ -929,7 +929,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           # Host tools the OpenWrt SDK's make expects, plus clang for the eBPF
-          # objects that bpf2go embeds
+          # objects that bpf2go embeds and llvm for llvm-strip
           sudo apt-get install -y --no-install-recommends \
             build-essential bzip2 perl python3 rsync unzip git ca-certificates file \
             clang llvm
