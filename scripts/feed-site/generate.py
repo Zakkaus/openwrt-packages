@@ -68,7 +68,7 @@ TEXT = {
 		'install': 'Install',
 		'key': 'Import the signing key',
 		'repos': 'Add the repositories',
-		'repos_note': 'A package the system also has is only taken from this feed when named with the <code>@daeuniverse</code> tag, so system packages of the same name stay in place.',
+		'repos_note': 'The <code>@daeuniverse</code> tag selects this feed; otherwise, system packages take precedence.',
 		'add': 'Install the packages',
 		'add_note': 'Without LuCI, leave out the <code>luci-</code> packages.',
 		'start': 'Enable the service',
@@ -81,16 +81,16 @@ TEXT = {
 		'th_status': 'Status',
 		'version_rows': [
 			('25.12', '6.12', 'Supported on OpenWrt and ImmortalWrt.'),
-			('24.10', '6.6', 'Not supported. It installs packages with opkg, which has no tags, so this feed would replace packages of the same name; ImmortalWrt 24.10 ships its own dae. The kernel is older than honk needs.'),
-			('23.05 and older', '≤ 5.15', 'Not supported. The kernel is older than dae and honk need.'),
+			('24.10', '6.6', 'Unsupported: opkg has no tags, so this feed would replace same-name packages. ImmortalWrt includes dae. honk needs kernel 6.12+.'),
+			('23.05 and older', '≤ 5.15', 'Unsupported: kernel too old for either service (dae needs 5.17+).'),
 		],
-		'kernel_note': 'dae needs kernel 5.17 or later, honk 6.12 or later.',
-		'builds_note': 'Official OpenWrt kernels have no BTF. dae and honk depend on <code>vmlinux-btf</code>, built for the targets and releases below only; official OpenWrt on other targets is not supported. On a kernel with its own BTF (ImmortalWrt), the empty <code>vmlinux-btf-builtin</code> takes its place.',
-		'no_arches': '32-bit ARM and MIPS have no packages and are not supported on OpenWrt or ImmortalWrt.',
+		'builds': 'OpenWrt targets and BTF',
+		'builds_note': 'Official OpenWrt has no kernel BTF: dae and honk need <code>vmlinux-btf</code>, available only for the targets and releases below. Other targets are unsupported. Kernels with BTF (ImmortalWrt) use the empty <code>vmlinux-btf-builtin</code> instead.',
 		'check': 'Check the release and target of the router:',
 		'th_target': 'Target',
 		'th_releases': 'Releases',
-		'arches': 'Architectures of the {series} packages (ImmortalWrt needs only these to match): ',
+		'colon': ': ',
+		'arches': 'Package architectures (ImmortalWrt only needs a match; no packages or support for 32-bit ARM or MIPS on either system):',
 		'no_builds': 'Nothing has been published yet.',
 		'errors': 'Common errors',
 		'th_error': 'Message',
@@ -147,7 +147,7 @@ TEXT = {
 		'install': '安装',
 		'key': '导入签名公钥',
 		'repos': '添加软件源',
-		'repos_note': '<code>@daeuniverse</code>标签使系统也有的软件包只在带标签指名时才从本源安装，不会取代系统的同名软件包。',
+		'repos_note': '<code>@daeuniverse</code>标签指定从本源安装；不带标签时优先使用系统软件包。',
 		'add': '安装软件包',
 		'add_note': '不使用 LuCI 时，省略<code>luci-</code>开头的软件包。',
 		'start': '启用服务',
@@ -160,16 +160,16 @@ TEXT = {
 		'th_status': '状态',
 		'version_rows': [
 			('25.12', '6.12', '支持 OpenWrt 和 ImmortalWrt。'),
-			('24.10', '6.6', '不支持。它用 opkg 安装软件包，opkg 没有标签，本源会取代同名软件包；ImmortalWrt 24.10 已自带 dae。内核低于 honk 的要求。'),
-			('23.05 及更早', '≤ 5.15', '不支持。内核低于 dae 和 honk 的要求。'),
+			('24.10', '6.6', '不支持：opkg 没有标签，本源会取代同名软件包；ImmortalWrt 已自带 dae。honk 需内核 6.12 以上。'),
+			('23.05 及更早', '≤ 5.15', '不支持：内核低于两者要求（dae 需 5.17 以上）。'),
 		],
-		'kernel_note': 'dae 需要内核 5.17 及以上，honk 需要 6.12 及以上。',
-		'builds_note': '官方 OpenWrt 内核不含 BTF。dae 和 honk 依赖<code>vmlinux-btf</code>，它只为下表的 target 和版本提供；其他 target 的官方 OpenWrt 不支持。内核自带 BTF 时（ImmortalWrt），由空包<code>vmlinux-btf-builtin</code>代替。',
-		'no_arches': '32 位 ARM 和 MIPS 没有软件包，OpenWrt 和 ImmortalWrt 都不支持。',
+		'builds': 'OpenWrt target 与 BTF',
+		'builds_note': '官方 OpenWrt 内核不含 BTF，dae 和 honk 需<code>vmlinux-btf</code>，仅提供下表的 target 和版本；其他 target 不支持。内核自带 BTF 时（ImmortalWrt），由空包<code>vmlinux-btf-builtin</code>代替。',
 		'check': '查询路由器的版本和 target：',
 		'th_target': 'Target',
 		'th_releases': '版本',
-		'arches': '{series} 软件包的架构（ImmortalWrt 只需架构相符）：',
+		'colon': '：',
+		'arches': '软件包架构（ImmortalWrt 只需架构相符；32 位 ARM 和 MIPS 无软件包，两种系统均不支持）：',
 		'no_builds': '尚未发布。',
 		'errors': '常见错误',
 		'th_error': '错误信息',
@@ -226,7 +226,7 @@ TEXT = {
 		'install': '安裝',
 		'key': '匯入簽章公鑰',
 		'repos': '加入軟體源',
-		'repos_note': '<code>@daeuniverse</code>標籤使系統也有的套件只在帶標籤指名時才從本源安裝，不會取代系統的同名套件。',
+		'repos_note': '<code>@daeuniverse</code>標籤指定從本源安裝；不帶標籤時優先使用系統套件。',
 		'add': '安裝套件',
 		'add_note': '不使用 LuCI 時，省略<code>luci-</code>開頭的套件。',
 		'start': '啟用服務',
@@ -239,16 +239,16 @@ TEXT = {
 		'th_status': '狀態',
 		'version_rows': [
 			('25.12', '6.12', '支援 OpenWrt 和 ImmortalWrt。'),
-			('24.10', '6.6', '不支援。它用 opkg 安裝套件，opkg 沒有標籤，本源會取代同名套件；ImmortalWrt 24.10 已內建 dae。核心低於 honk 的要求。'),
-			('23.05 及更早', '≤ 5.15', '不支援。核心低於 dae 和 honk 的要求。'),
+			('24.10', '6.6', '不支援：opkg 沒有標籤，本源會取代同名套件；ImmortalWrt 已內建 dae。honk 需核心 6.12 以上。'),
+			('23.05 及更早', '≤ 5.15', '不支援：核心低於兩者要求（dae 需 5.17 以上）。'),
 		],
-		'kernel_note': 'dae 需要核心 5.17 以上，honk 需要 6.12 以上。',
-		'builds_note': '官方 OpenWrt 核心不含 BTF。dae 和 honk 依賴<code>vmlinux-btf</code>，它只為下表的 target 和版本提供；其他 target 的官方 OpenWrt 不支援。核心自帶 BTF 時（ImmortalWrt），由空套件<code>vmlinux-btf-builtin</code>代替。',
-		'no_arches': '32 位 ARM 和 MIPS 沒有套件，OpenWrt 和 ImmortalWrt 都不支援。',
+		'builds': 'OpenWrt target 與 BTF',
+		'builds_note': '官方 OpenWrt 核心不含 BTF，dae 和 honk 需<code>vmlinux-btf</code>，僅提供下表的 target 和版本；其他 target 不支援。核心自帶 BTF 時（ImmortalWrt），由空套件<code>vmlinux-btf-builtin</code>代替。',
 		'check': '查詢路由器的版本和 target：',
 		'th_target': 'Target',
 		'th_releases': '版本',
-		'arches': '{series} 套件的架構（ImmortalWrt 只需架構相符）：',
+		'colon': '：',
+		'arches': '套件架構（ImmortalWrt 只需架構相符；32 位元 ARM 和 MIPS 無套件，兩種系統均不支援）：',
 		'no_builds': '尚未發布。',
 		'errors': '常見錯誤',
 		'th_error': '錯誤訊息',
@@ -406,7 +406,6 @@ def texts(lang, t):
 		'app': variants('app', dae='dae', honk='honk'),
 		'conf': variants('app', dae='/etc/dae/config.dae', honk='/etc/honk/config.dae'),
 		'docs': variants('app', **{app: f'<a href="{url}">{app} {t["docs"]}</a>' for app, url in DOCS.items()}),
-		'series': '{series}',  # filled per series below
 	}
 	T = {k: v.format(**fill) if isinstance(v, str) else v for k, v in t.items()}
 	if lang.startswith('zh'):
@@ -438,30 +437,41 @@ def guide(lang, T, builds, base):
 	# vmlinux-btf-builtin on ImmortalWrt.
 
 	if builds:
-		# One row per target with the releases that have vmlinux-btf for it,
-		# then the architectures of each series, which is all ImmortalWrt needs
 		releases = {}
 		for series, entry in builds.items():
 			for release, targets in entry['kmods'].items():
 				for target in targets:
 					releases.setdefault(target, []).append((series, release))
 		link = lambda path, text: f'<a href="../{esc(path)}/">{esc(text)}</a>'
-		rows = ''.join(
-			f'<tr><td class="mono">{esc(target)}</td><td class="mono">'
-			+ ' '.join(link(f'{s}/kmods/{r}/{target}', r) for s, r in sorted(found, key=lambda sr: version_key(sr[1]), reverse=True))
-			+ '</td></tr>'
-			for target, found in sorted(releases.items()))
-		table = (f'<div class="table"><table><thead><tr><th>{T["th_target"]}</th><th>{T["th_releases"]}</th></tr></thead>'
-		         f'<tbody>{rows}</tbody></table></div>' if rows else '')
-		table += ''.join(
-			f'<p>{T["arches"].format(series=esc(series))}<span class="mono">'
+		common = next(iter(releases.values()), [])
+		if len(common) == 1 and all(found == common for found in releases.values()):
+			series, release = common[0]
+			rows = ''.join(
+				f'<tr><td class="mono">{link(f"{series}/kmods/{release}/{target}", target)}</td></tr>'
+				for target in sorted(releases))
+			table = (f'<div class="table"><table class="stack"><caption>{T["th_releases"]}{T["colon"]}{esc(release)}</caption>'
+			         f'<thead><tr><th>{T["th_target"]}</th></tr></thead><tbody>{rows}</tbody></table></div>')
+		else:
+			rows = ''.join(
+				f'<tr><td class="mono">{esc(target)}</td><td class="mono" data-label="{T["th_releases"]}">'
+				+ ' '.join(link(f'{s}/kmods/{r}/{target}', r) for s, r in sorted(found, key=lambda sr: version_key(sr[1]), reverse=True))
+				+ '</td></tr>'
+				for target, found in sorted(releases.items()))
+			table = (f'<div class="table"><table class="stack"><thead><tr><th>{T["th_target"]}</th><th>{T["th_releases"]}</th></tr></thead>'
+			         f'<tbody>{rows}</tbody></table></div>' if rows else '')
+		arches = ''.join(
+			f'<li>{esc(series)}{T["colon"]}<span class="mono">'
 			+ ' '.join(link(f'{series}/packages/{arch}', arch) for arch in sorted(entry['packages']))
-			+ '</span></p>'
+			+ '</span></li>'
 			for series, entry in builds.items() if entry['packages'])
+		arches = f'<ul class="architectures">{arches}</ul>' if arches else ''
 	else:
 		table = f'<p>{T["no_builds"]}</p>'
+		arches = ''
 
-	errors = ''.join(f'<tr><td class="mono">{esc(e)}</td><td>{c}</td></tr>' for e, c in T['error_items'])
+	errors = ''.join(
+		f'<details class="reference"><summary class="mono">{esc(e)}</summary><p>{c}</p></details>'
+		for e, c in T['error_items'])
 	kernel = T['th_kernel']
 	versions = ''.join(f'<tr><td>{esc(v)}</td><td data-label="{kernel}">{esc(k)}</td><td>{status}</td></tr>' for v, k, status in T['version_rows'])
 	sections = [('versions', T['versions']), ('install', T['install']), ('errors', T['errors'])]
@@ -470,12 +480,14 @@ def guide(lang, T, builds, base):
 	return sections, f'''
 {h2["versions"]}
 <div class="table"><table class="stack"><thead><tr><th>{T["th_series"]}</th><th>{T["th_kernel"]}</th><th>{T["th_status"]}</th></tr></thead><tbody>{versions}</tbody></table></div>
-<p>{T["kernel_note"]}</p>
 <p>{T["check"]}</p>
 {code(". /etc/openwrt_release\necho $DISTRIB_RELEASE $DISTRIB_ARCH $DISTRIB_TARGET", T)}
+<p>{T["arches"]}</p>
+{arches}
+<details class="reference"><summary>{T["builds"]}</summary>
 <p>{T["builds_note"]}</p>
 {table}
-<p>{T["no_arches"]}</p>
+</details>
 
 {h2["install"]}
 <div class="choices">
@@ -500,7 +512,7 @@ def guide(lang, T, builds, base):
 </ol>
 
 {h2["errors"]}
-<div class="table"><table class="stack"><thead><tr><th>{T["th_error"]}</th><th>{T["th_cause"]}</th></tr></thead><tbody>{errors}</tbody></table></div>
+{errors}
 '''
 
 

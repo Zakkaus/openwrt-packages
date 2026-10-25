@@ -230,6 +230,12 @@ svg.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCol
 
 .article p { margin: var(--space-3) 0; }
 
+.reference { margin: var(--space-3) 0; border-bottom: 1px solid var(--line); }
+.reference > summary { padding-block: var(--space-3); cursor: pointer; overflow-wrap: anywhere; }
+.reference > summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.reference > :last-child:not(summary) { margin-bottom: var(--space-4); }
+.architectures { padding-inline-start: var(--space-6); }
+
 .anchor { margin-left: var(--space-2); color: var(--text-secondary); font-weight: 400; text-decoration: none; opacity: 0; transition: opacity 0.175s var(--ease); }
 h2:hover .anchor, .anchor:focus { opacity: 1; }
 
@@ -367,6 +373,7 @@ body:has(#app-honk:checked) [data-app="dae"] { display: none; }
 .table { margin: var(--space-4) 0; overflow-x: auto; }
 
 table { width: 100%; border-collapse: collapse; font-size: 16px; line-height: 24px; }
+caption { text-align: start; font-weight: 600; padding-block: var(--space-2); }
 
 th, td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th:first-child, td:first-child { padding-left: 0; white-space: nowrap; }
