@@ -9,8 +9,8 @@ only what one run built:
   <series>/packages/<arch>/packages.adb                       e.g. 25.12
   <series>/kmods/<release>/<target>/<subtarget>/packages.adb  e.g. 25.12.6
 It writes <lang>/index.html in English, Simplified and Traditional Chinese, with
-an rsync URL also <lang>/mirror.html on mirroring the feed, and copies assets/
-next to them. Only the standard library is used.
+an rsync URL also <lang>/mirror.html on mirroring the feed, <lang>/thanks.html,
+and copies assets/ next to them. Only the standard library is used.
 """
 
 import datetime
@@ -35,6 +35,20 @@ LANGS = [
 # The mirror is hosted by gentoo-zh; the thanks link to its page in the same language
 GENTOOZH = {'en': 'https://gentoozh.org/en/', 'zh-cn': 'https://gentoozh.org/', 'zh-tw': 'https://gentoozh.org/zh-tw/'}
 
+# The thanks page: project and link (per language for gentoo-zh); what each is
+# used for is in TEXT['thanks_used']
+THANKS = [
+	('gentoo-zh', GENTOOZH),
+	('QiuSimons/vmlinux-btf', 'https://github.com/QiuSimons/vmlinux-btf'),
+	('OpenWrt', 'https://openwrt.org/'),
+	('daeuniverse/dae', 'https://github.com/daeuniverse/dae'),
+	('daeuniverse/honk', 'https://github.com/daeuniverse/honk'),
+	('Zakkaus/doona', 'https://github.com/Zakkaus/doona'),
+	('aya-rs/bpf-linker', 'https://github.com/aya-rs/bpf-linker'),
+	('Figtree', 'https://github.com/erikdkennedy/figtree'),
+	('Lucide', 'https://lucide.dev/'),
+]
+
 # Translated text, as HTML. {app}, {conf} and {docs} follow the chosen service.
 TEXT = {
 	'en': {
@@ -42,6 +56,7 @@ TEXT = {
 		'subtitle': 'apk packages of dae, honk and their LuCI apps for OpenWrt 25.12 and later.',
 		'nav_guide': 'Guide',
 		'nav_mirror': 'Mirror',
+		'nav_thanks': 'Thanks',
 		'nav_files': 'Files',
 		'language': 'Language',
 		'theme': 'Light or dark',
@@ -97,12 +112,28 @@ TEXT = {
 		'use': 'Use',
 		'use_note': 'Follow the <a href="./">guide</a> with the mirror in <code>FEED</code>:',
 		'use_key': 'Import the signing key from this site, not from the mirror.',
+		'thanks_title': 'Thanks',
+		'thanks_subtitle': 'Projects this feed is built on.',
+		'th_project': 'Project',
+		'th_used': 'Used for',
+		'thanks_used': {
+			'gentoo-zh': 'Hosting the mirror',
+			'QiuSimons/vmlinux-btf': 'The vmlinux-btf approach and stub sources',
+			'OpenWrt': 'SDKs, toolchains and kernel headers',
+			'daeuniverse/dae': 'Source of dae',
+			'daeuniverse/honk': 'Source of honk',
+			'Zakkaus/doona': 'honk\'s embedded dashboard',
+			'aya-rs/bpf-linker': 'Linking honk\'s eBPF object',
+			'Figtree': 'Page font (SIL OFL 1.1)',
+			'Lucide': 'Page icons (ISC)',
+		},
 	},
 	'zh-cn': {
 		'title': 'OpenWrt 软件源',
 		'subtitle': 'dae、honk 及其 LuCI 界面的 apk 软件包，适用于 OpenWrt 25.12 及以上版本。',
 		'nav_guide': '说明',
 		'nav_mirror': '镜像',
+		'nav_thanks': '致谢',
 		'nav_files': '文件',
 		'language': '语言',
 		'theme': '浅色或深色',
@@ -158,12 +189,28 @@ TEXT = {
 		'use': '使用',
 		'use_note': '按<a href="./">说明</a>操作，<code>FEED</code>改为镜像地址：',
 		'use_key': '签名公钥请从本站导入，不要从镜像导入。',
+		'thanks_title': '致谢',
+		'thanks_subtitle': '本源所依托的项目。',
+		'th_project': '项目',
+		'th_used': '用途',
+		'thanks_used': {
+			'gentoo-zh': '镜像托管',
+			'QiuSimons/vmlinux-btf': 'vmlinux-btf 的做法与桩代码',
+			'OpenWrt': 'SDK、工具链与内核头文件',
+			'daeuniverse/dae': 'dae 源码',
+			'daeuniverse/honk': 'honk 源码',
+			'Zakkaus/doona': 'honk 内置的控制面板',
+			'aya-rs/bpf-linker': '链接 honk 的 eBPF 对象',
+			'Figtree': '页面字体（SIL OFL 1.1）',
+			'Lucide': '页面图标（ISC）',
+		},
 	},
 	'zh-tw': {
 		'title': 'OpenWrt 軟體源',
 		'subtitle': 'dae、honk 及其 LuCI 介面的 apk 套件，適用於 OpenWrt 25.12 以上版本。',
 		'nav_guide': '說明',
 		'nav_mirror': '鏡像',
+		'nav_thanks': '致謝',
 		'nav_files': '檔案',
 		'language': '語言',
 		'theme': '淺色或深色',
@@ -219,6 +266,21 @@ TEXT = {
 		'use': '使用',
 		'use_note': '依<a href="./">說明</a>操作，<code>FEED</code>改為鏡像位址：',
 		'use_key': '簽章公鑰請從本站匯入，不要從鏡像匯入。',
+		'thanks_title': '致謝',
+		'thanks_subtitle': '本源所依託的專案。',
+		'th_project': '專案',
+		'th_used': '用途',
+		'thanks_used': {
+			'gentoo-zh': '鏡像託管',
+			'QiuSimons/vmlinux-btf': 'vmlinux-btf 的做法與 stub 原始碼',
+			'OpenWrt': 'SDK、工具鏈與核心標頭檔',
+			'daeuniverse/dae': 'dae 原始碼',
+			'daeuniverse/honk': 'honk 原始碼',
+			'Zakkaus/doona': 'honk 內建的控制面板',
+			'aya-rs/bpf-linker': '連結 honk 的 eBPF 物件',
+			'Figtree': '頁面字型（SIL OFL 1.1）',
+			'Lucide': '頁面圖示（ISC）',
+		},
 	},
 }
 
@@ -454,11 +516,21 @@ def mirror(T, rsync):
 '''
 
 
+def thanks(lang, T):
+	rows = ''.join(
+		f'<tr><td><a href="{esc(url[lang] if isinstance(url, dict) else url)}">{esc(name)}</a></td><td>{T["thanks_used"][name]}</td></tr>'
+		for name, url in THANKS)
+	return [], f'''
+<div class="table"><table class="stack"><thead><tr><th>{T["th_project"]}</th><th>{T["th_used"]}</th></tr></thead><tbody>{rows}</tbody></table></div>
+'''
+
+
 # The pages of a language directory, in the order of the top bar: file name,
 # nav text, title and subtitle
 PAGES = [
 	('index.html', 'nav_guide', 'title', 'subtitle'),
 	('mirror.html', 'nav_mirror', 'mirror_title', 'mirror_subtitle'),
+	('thanks.html', 'nav_thanks', 'thanks_title', 'thanks_subtitle'),
 ]
 
 
@@ -528,6 +600,7 @@ def main():
 		bodies = {'index.html': guide(lang, T, builds, base)}
 		if rsync:
 			bodies['mirror.html'] = mirror(T, rsync)
+		bodies['thanks.html'] = thanks(lang, T)
 		(site / lang).mkdir(parents=True, exist_ok=True)
 		for name, (sections, body) in bodies.items():
 			html_text = page(lang, html_lang, T, base, bodies, name, sections, body)

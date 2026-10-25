@@ -639,8 +639,8 @@ job logs), the packages are pinned to the upstream releases above, and the
   `luci-lib-daeuniverse`): service status, a configuration editor that follows
   `include`, and the log, in English and Chinese.
 * A signed apk package feed at <https://openwrt.daeuniverse.org/> with a
-  landing page, and a page on mirroring it with rsync; the GitHub Releases and
-  the feed upload can each be turned off.
+  landing page, a page on mirroring it with rsync and a thanks page; the GitHub
+  Releases and the feed upload can each be turned off.
 * `vmlinux-btf` is locked to the exact kernel it was built for and provides
   `kmod-xdp-sockets-diag`, so `apk add dae` works on official OpenWrt; the
   preinst/postinst generation check is gone.
