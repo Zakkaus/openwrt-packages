@@ -63,10 +63,11 @@ git clone --recurse-submodules --branch v2.1.1 https://github.com/daeuniverse/da
 git clone --branch v0.1.0-beta.1 https://github.com/daeuniverse/honk honk/src
 ```
 
-Installing `dae` from the feed also brings in `vmlinux-btf`, the provider of
-its `kmod-xdp-sockets-diag`, and builds it along with dae. It needs the blob
-as `VMLINUX_BTF_SRC`, so pass `CONFIG_PACKAGE_vmlinux-btf=` to `make` (or
-deselect it) when building without one, as the dae and LuCI jobs do.
+`./scripts/feeds install dae` also installs `vmlinux-btf`, the provider of
+dae's `kmod-xdp-sockets-diag`, and `make package/dae/compile` builds it first.
+It needs the blob as `VMLINUX_BTF_SRC`; without one, pass
+`CONFIG_PACKAGE_vmlinux-btf=` on the `make` command line, as the dae and LuCI
+jobs do. Deselecting it in `.config` drops dae as well on official OpenWrt.
 
 ## What it produces
 

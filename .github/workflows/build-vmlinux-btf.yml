@@ -132,7 +132,7 @@ name: Build vmlinux (BTF)
 #           release and target
 #   public-key.pem                                 the key of every packages.adb
 #   en/ zh-cn/ zh-tw/ assets/                      the landing page
-# The mirror itself serves / and files/ (a listing), which the page links to.
+# The mirror itself serves / (a redirect to a language) and files/ (a listing).
 # Releases older than the newest of a series keep their kmods directory. Only
 # apk releases are built: 24.10 uses opkg, which has no repository tags,
 # and 23.05 and older run kernels older than the 5.17 that dae needs.
@@ -963,11 +963,11 @@ jobs:
           # dae depends on kmod-xdp-sockets-diag, which the SDK kernel cannot
           # build (KERNEL_XDP_SOCKETS is off) and vmlinux-btf provides, so
           # feeds install brought vmlinux-btf in as well. Command-line variables
-          # win over .config: dae is selected here, as defconfig only keeps it
-          # through that provide (without dae in .config the compile target
-          # builds nothing and make still exits 0), and vmlinux-btf deselected:
-          # while it is selected its compile target is one of dae's, and it
-          # needs the BTF blob only the kernel job has. The runtime dependencies
+          # win over .config, so the build does not depend on what defconfig
+          # made of that: dae is selected (without it the compile target builds
+          # nothing and make still exits 0). vmlinux-btf is deselected, as its
+          # compile target is one of dae's while it is selected and needs the
+          # BTF blob only the kernel job has. The runtime dependencies
           # (ca-bundle, kmod-*) still end up in the package metadata.
           #
           # One value for the package version and the version the binary reports
@@ -1697,10 +1697,11 @@ jobs:
       # The first pass only creates the directories and the public key. Each
       # architecture and target directory is then synced on its own with
       # --delay-updates: its packages, which are signed anew on every run, and
-      # its index only replace the old ones at the end, all at once, so a
-      # device does not read an index that does not match the files, and
-      # packages the index no longer names are deleted only after that. A run
-      # that builds fewer targets leaves the directories of the others alone.
+      # its index only replace the old ones at the end, one right after the
+      # other, so a device does not read an index that does not match the
+      # files. Packages the index no longer names are deleted only after that.
+      # A run that builds fewer targets leaves the directories of the others
+      # alone.
       - name: Upload the packages and indexes
         run: |
           set -euo pipefail
