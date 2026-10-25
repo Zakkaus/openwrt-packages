@@ -77,13 +77,15 @@ TEXT = {
 		'docs': 'documentation',
 		'versions': 'Supported versions',
 		'th_series': 'Version',
+		'th_kernel': 'Kernel',
 		'th_status': 'Status',
 		'version_rows': [
-			('25.12', 'Supported on OpenWrt and ImmortalWrt.'),
-			('24.10', 'Not supported. It installs packages with opkg, which has no tags, so this feed would replace packages of the same name; ImmortalWrt 24.10 ships its own dae.'),
-			('23.05 and older', 'Not supported. The kernel is older than 5.17, the minimum dae needs.'),
+			('25.12', '6.12', 'Supported on OpenWrt and ImmortalWrt.'),
+			('24.10', '6.6', 'Not supported. It installs packages with opkg, which has no tags, so this feed would replace packages of the same name; ImmortalWrt 24.10 ships its own dae. The kernel is older than honk needs.'),
+			('23.05 and older', '≤ 5.15', 'Not supported. The kernel is older than dae and honk need.'),
 		],
-		'builds_note': 'Official OpenWrt kernels have no BTF, so dae and honk need <code>vmlinux-btf</code>, which is built for the targets and releases below only; official OpenWrt on other targets is not supported.',
+		'kernel_note': 'dae needs kernel 5.17 or later, honk 6.12 or later.',
+		'builds_note': 'Official OpenWrt kernels have no BTF. dae and honk depend on <code>vmlinux-btf</code>, built for the targets and releases below only; official OpenWrt on other targets is not supported. On a kernel with its own BTF (ImmortalWrt), the empty <code>vmlinux-btf-builtin</code> takes its place.',
 		'no_arches': '32-bit ARM and MIPS have no packages and are not supported on OpenWrt or ImmortalWrt.',
 		'check': 'Check the release and target of the router:',
 		'th_target': 'Target',
@@ -95,8 +97,8 @@ TEXT = {
 		'th_cause': 'Cause',
 		'error_items': [
 			('UNTRUSTED signature', 'The signing key is not imported.'),
-			('vmlinux-btf (no such package)', 'No vmlinux-btf for this release and target, or the kmods repository is missing.'),
-			('vmlinux-btf breaks: kernel', 'The firmware runs a self-built or snapshot kernel, not the release kernel.'),
+			('This kernel has no BTF of its own', 'The kmods repository is missing (add it, then run <code>apk update &amp;&amp; apk upgrade vmlinux-btf-builtin</code>), or no vmlinux-btf is built for this release and target.'),
+			('breaks: vmlinux-btf', 'The kernel is not the release kernel of this target (ImmortalWrt, self-built, snapshot): remove the kmods repository.'),
 		],
 		'edit': 'Edit this page',
 		'updated': 'Updated {date}',
@@ -154,13 +156,15 @@ TEXT = {
 		'docs': '文档',
 		'versions': '支持的版本',
 		'th_series': '版本',
+		'th_kernel': '内核',
 		'th_status': '状态',
 		'version_rows': [
-			('25.12', '支持 OpenWrt 和 ImmortalWrt。'),
-			('24.10', '不支持。它用 opkg 安装软件包，opkg 没有标签，本源会取代同名软件包；ImmortalWrt 24.10 已自带 dae。'),
-			('23.05 及更早', '不支持。内核低于 dae 要求的 5.17。'),
+			('25.12', '6.12', '支持 OpenWrt 和 ImmortalWrt。'),
+			('24.10', '6.6', '不支持。它用 opkg 安装软件包，opkg 没有标签，本源会取代同名软件包；ImmortalWrt 24.10 已自带 dae。内核低于 honk 的要求。'),
+			('23.05 及更早', '≤ 5.15', '不支持。内核低于 dae 和 honk 的要求。'),
 		],
-		'builds_note': '官方 OpenWrt 内核不含 BTF，dae 和 honk 需要<code>vmlinux-btf</code>，它只为下表的 target 和版本提供；其他 target 的官方 OpenWrt 不支持。',
+		'kernel_note': 'dae 需要内核 5.17 及以上，honk 需要 6.12 及以上。',
+		'builds_note': '官方 OpenWrt 内核不含 BTF。dae 和 honk 依赖<code>vmlinux-btf</code>，它只为下表的 target 和版本提供；其他 target 的官方 OpenWrt 不支持。内核自带 BTF 时（ImmortalWrt），由空包<code>vmlinux-btf-builtin</code>代替。',
 		'no_arches': '32 位 ARM 和 MIPS 没有软件包，OpenWrt 和 ImmortalWrt 都不支持。',
 		'check': '查询路由器的版本和 target：',
 		'th_target': 'Target',
@@ -172,8 +176,8 @@ TEXT = {
 		'th_cause': '原因',
 		'error_items': [
 			('UNTRUSTED signature', '未导入签名公钥。'),
-			('vmlinux-btf (no such package)', '此版本或 target 没有 vmlinux-btf，或缺少 kmods 软件源。'),
-			('vmlinux-btf breaks: kernel', '固件使用自编译或快照版内核，不是正式版内核。'),
+			('This kernel has no BTF of its own', '缺少 kmods 软件源（添加后执行<code>apk update &amp;&amp; apk upgrade vmlinux-btf-builtin</code>），或此版本和 target 没有 vmlinux-btf。'),
+			('breaks: vmlinux-btf', '内核不是此 target 的正式版内核（ImmortalWrt、自编译、快照版），删除 kmods 软件源。'),
 		],
 		'edit': '编辑此页',
 		'updated': '更新于 {date}',
@@ -231,13 +235,15 @@ TEXT = {
 		'docs': '文件',
 		'versions': '支援的版本',
 		'th_series': '版本',
+		'th_kernel': '核心',
 		'th_status': '狀態',
 		'version_rows': [
-			('25.12', '支援 OpenWrt 和 ImmortalWrt。'),
-			('24.10', '不支援。它用 opkg 安裝套件，opkg 沒有標籤，本源會取代同名套件；ImmortalWrt 24.10 已內建 dae。'),
-			('23.05 及更早', '不支援。核心低於 dae 要求的 5.17。'),
+			('25.12', '6.12', '支援 OpenWrt 和 ImmortalWrt。'),
+			('24.10', '6.6', '不支援。它用 opkg 安裝套件，opkg 沒有標籤，本源會取代同名套件；ImmortalWrt 24.10 已內建 dae。核心低於 honk 的要求。'),
+			('23.05 及更早', '≤ 5.15', '不支援。核心低於 dae 和 honk 的要求。'),
 		],
-		'builds_note': '官方 OpenWrt 核心不含 BTF，dae 和 honk 需要<code>vmlinux-btf</code>，它只為下表的 target 和版本提供；其他 target 的官方 OpenWrt 不支援。',
+		'kernel_note': 'dae 需要核心 5.17 以上，honk 需要 6.12 以上。',
+		'builds_note': '官方 OpenWrt 核心不含 BTF。dae 和 honk 依賴<code>vmlinux-btf</code>，它只為下表的 target 和版本提供；其他 target 的官方 OpenWrt 不支援。核心自帶 BTF 時（ImmortalWrt），由空套件<code>vmlinux-btf-builtin</code>代替。',
 		'no_arches': '32 位 ARM 和 MIPS 沒有套件，OpenWrt 和 ImmortalWrt 都不支援。',
 		'check': '查詢路由器的版本和 target：',
 		'th_target': 'Target',
@@ -249,8 +255,8 @@ TEXT = {
 		'th_cause': '原因',
 		'error_items': [
 			('UNTRUSTED signature', '未匯入簽章公鑰。'),
-			('vmlinux-btf (no such package)', '此版本或 target 沒有 vmlinux-btf，或缺少 kmods 軟體源。'),
-			('vmlinux-btf breaks: kernel', '韌體使用自行編譯或快照版核心，不是正式版核心。'),
+			('This kernel has no BTF of its own', '缺少 kmods 軟體源（加入後執行<code>apk update &amp;&amp; apk upgrade vmlinux-btf-builtin</code>），或此版本和 target 沒有 vmlinux-btf。'),
+			('breaks: vmlinux-btf', '核心不是此 target 的正式版核心（ImmortalWrt、自行編譯、快照版），刪除 kmods 軟體源。'),
 		],
 		'edit': '編輯此頁',
 		'updated': '更新於 {date}',
@@ -425,14 +431,11 @@ def guide(lang, T, builds, base):
 		'apk update')
 	i18n = {'zh-cn': ' \\\n    luci-i18n-daeuniverse-zh-cn@daeuniverse', 'zh-tw': ' \\\n    luci-i18n-daeuniverse-zh-tw@daeuniverse'}.get(lang, '')
 	per_app = lambda make: ''.join(code(make(app), T, f' data-app="{app}"') for app in DOCS)
-	per_os_app = lambda make: ''.join(code(make(os, app), T, f' data-os="{os}" data-app="{app}"')
-	                                  for os in ('openwrt', 'immortalwrt') for app in DOCS)
 	# A dependency the system also has comes from the system unless it is
 	# named with the tag, so the service is named as well: ImmortalWrt has a
-	# dae of its own, which would be picked otherwise.
-	# Official OpenWrt needs the BTF of vmlinux-btf; dae would pull it in
-	# through kmod-xdp-sockets-diag, honk would not, so it is named for both.
-	btf = {'openwrt': ' vmlinux-btf@daeuniverse', 'immortalwrt': ''}
+	# dae of its own, which would be picked otherwise. vmlinux-btf, which
+	# neither system has, comes along: the real one from the kmods repository,
+	# vmlinux-btf-builtin on ImmortalWrt.
 
 	if builds:
 		# One row per target with the releases that have vmlinux-btf for it,
@@ -459,13 +462,15 @@ def guide(lang, T, builds, base):
 		table = f'<p>{T["no_builds"]}</p>'
 
 	errors = ''.join(f'<tr><td class="mono">{esc(e)}</td><td>{c}</td></tr>' for e, c in T['error_items'])
-	versions = ''.join(f'<tr><td>{esc(v)}</td><td>{status}</td></tr>' for v, status in T['version_rows'])
+	kernel = T['th_kernel']
+	versions = ''.join(f'<tr><td>{esc(v)}</td><td data-label="{kernel}">{esc(k)}</td><td>{status}</td></tr>' for v, k, status in T['version_rows'])
 	sections = [('versions', T['versions']), ('install', T['install']), ('errors', T['errors'])]
 	h2 = {key: heading(key, title) for key, title in sections}
 
 	return sections, f'''
 {h2["versions"]}
-<div class="table"><table class="stack"><thead><tr><th>{T["th_series"]}</th><th>{T["th_status"]}</th></tr></thead><tbody>{versions}</tbody></table></div>
+<div class="table"><table class="stack"><thead><tr><th>{T["th_series"]}</th><th>{T["th_kernel"]}</th><th>{T["th_status"]}</th></tr></thead><tbody>{versions}</tbody></table></div>
+<p>{T["kernel_note"]}</p>
 <p>{T["check"]}</p>
 {code(". /etc/openwrt_release\necho $DISTRIB_RELEASE $DISTRIB_ARCH $DISTRIB_TARGET", T)}
 <p>{T["builds_note"]}</p>
@@ -486,7 +491,7 @@ def guide(lang, T, builds, base):
 <p>{T["repos_note"]}</p>
 </li>
 <li><h3>{T["add"]}</h3>
-{per_os_app(lambda os, app: f"apk add {app}@daeuniverse luci-app-{app}@daeuniverse{btf[os]}{i18n}")}
+{per_app(lambda app: f"apk add {app}@daeuniverse luci-app-{app}@daeuniverse{i18n}")}
 <p>{T["add_note"]}</p></li>
 <li><h3>{T["start"]}</h3>
 <p>{T["start_note"]}</p>
