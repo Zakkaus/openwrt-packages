@@ -44,30 +44,29 @@ name: Build vmlinux (BTF)
 # its fallback) of every target in the job summary, and the script prints the
 # tarball, the checksum file and the host each download finally came from.
 #
-# Targets built here, named by their OpenWrt architecture (arch_packages):
+# Architectures built here (arch_packages), with the target/subtarget whose
+# SDK builds dae and honk for them:
 #   x86_64             -> x86/64
 #   aarch64_generic    -> armsr/armv8
 #   aarch64_cortex-a53 -> mediatek/filogic
 #   aarch64_cortex-a72 -> bcm27xx/bcm2711
 #   aarch64_cortex-a76 -> bcm27xx/bcm2712
-#
-# Several targets share the same arch_packages, so the list below picks one
-# representative target/subtarget per architecture. If a device needs a
-# different kernel .config, swap in another target/subtarget that reports the
-# same arch_packages (check profiles.json of that target).
+# The BTF follows the kernel .config of a target, not its architecture, so it
+# is built for every target of these architectures that the release lists in
+# .targets.json (18 on 25.12), with no list to maintain here.
 #
 # Three packages are built from this repository, whose root doubles as an
-# OpenWrt feed, and published in the same release, one per OpenWrt
-# architecture:
-#   vmlinux-btf/ - package "vmlinux-btf": the detached BTF blob of that
-#           architecture, installed as /usr/lib/debug/boot/vmlinux plus the
+# OpenWrt feed, and published in the same release:
+#   vmlinux-btf/ - package "vmlinux-btf", one per target: the detached BTF blob
+#           of that target, installed as /usr/lib/debug/boot/vmlinux plus the
 #           vmlinux-<kernel.release> symlink; its version is the kernel version
-#   dae/  - package "dae": Go, statically linked (CGO_ENABLED=0); no target C
-#           compiler is involved, its eBPF objects are compiled by clang
-#   honk/ - package "honk": Rust, cross compiled with the OpenWrt SDK toolchain:
-#           its C/C++ dependencies (BoringSSL, SQLite) are built by the SDK
-#           gcc/g++, and it links against the musl of that SDK, so the device
-#           needs libstdcpp. The full feature set is enabled (clash-api,
+#   dae/  - package "dae", one per architecture: Go, statically linked
+#           (CGO_ENABLED=0); no target C compiler is involved, its eBPF objects
+#           are compiled by clang
+#   honk/ - package "honk", one per architecture: Rust, cross compiled with the
+#           OpenWrt SDK toolchain: its C/C++ dependencies (BoringSSL, SQLite)
+#           are built by the SDK gcc/g++, and it links against the musl of that
+#           SDK, so the device needs libstdcpp. The full feature set is enabled (clash-api,
 #           mimalloc, rprx, ebpf, native-ui): native-ui embeds the doona
 #           dashboard downloaded from its release, so the UI is not built here.
 # These jobs only provide the toolchains (Go release tarball, rustup's prebuilt
@@ -76,11 +75,11 @@ name: Build vmlinux (BTF)
 # supported: it cannot be signed and is not published.
 #
 # Naming of the assets:
-#   <openwrt_version>-vmlinux-<openwrt_arch>-<kernel_version>.tar.xz
-#   <openwrt_version>-vmlinux-btf-<openwrt_arch>-<kernel_version>.apk
+#   <openwrt_version>-vmlinux-<target>-<subtarget>-<kernel_version>.tar.xz
+#   <openwrt_version>-vmlinux-btf-<target>-<subtarget>-<kernel_version>.apk
 #   <openwrt_version>-dae-<dae_version>-<openwrt_arch>.apk
 #   <openwrt_version>-honk-<honk_version>-<openwrt_arch>.apk
-#   e.g. 25.12.5-vmlinux-btf-aarch64_cortex-a53-6.12.94.apk
+#   e.g. 25.12.6-vmlinux-btf-mediatek-filogic-6.12.112.apk
 # Each vmlinux archive holds a single file named "vmlinux": the detached BTF
 # data, which is the same file upstream installs as
 # /usr/lib/debug/boot/vmlinux (plus the vmlinux-<release> symlink on the
@@ -112,8 +111,8 @@ name: Build vmlinux (BTF)
 # VERSION, and honk derives what it embeds from GITHUB_REF, so build.sh exports
 # a "refs/tags/v0.1.0-beta.1" ref for it.
 #
-# All architectures sharing the same kernel version are published together in
-# one GitHub Release with the gh CLI, tagged:
+# All targets sharing the same kernel version are published together in one
+# GitHub Release with the gh CLI, tagged:
 #   openwrt-<openwrt_version>-<kernel_version>-<date>
 #   e.g. openwrt-25.12.5-6.12.94-20261024
 # <date> is the UTC date of the run, the same for every kernel version it
@@ -139,9 +138,9 @@ name: Build vmlinux (BTF)
 # Both outputs are optional: with upload_release and upload_feed off, a run
 # only builds, which tests a branch without publishing anything.
 #
-# Note: the builds (three per target, plus the LuCI apps) run in parallel and
-# take a few minutes each, mostly the SDK download. Trim the target list below
-# if your plan limits concurrent jobs.
+# Note: the builds (one per target for the BTF, dae and honk per architecture,
+# plus the LuCI apps) run in parallel and take a few minutes each, mostly the
+# SDK download; on a plan with few concurrent jobs they queue.
 #
 # Usage: Actions -> Build vmlinux (BTF) -> Run workflow -> enter an OpenWrt version
 # =============================================================================
@@ -171,7 +170,7 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. Resolve the SDK, the kernel version and the build matrix
+  # 1. Resolve the SDKs, the kernel version and the build matrices
   # ---------------------------------------------------------------------------
   prepare:
     name: Resolve OpenWrt SDKs
@@ -179,9 +178,10 @@ jobs:
     outputs:
       openwrt_version: ${{ steps.resolve.outputs.openwrt_version }}
       release_date: ${{ steps.resolve.outputs.release_date }}
-      matrix: ${{ steps.resolve.outputs.matrix }}
+      targets: ${{ steps.resolve.outputs.targets }}
+      arches: ${{ steps.resolve.outputs.arches }}
     steps:
-      - name: Resolve SDK, kernel version and matrix
+      - name: Resolve SDKs, kernel version and matrices
         id: resolve
         env:
           INPUT_VERSION: ${{ inputs.openwrt_version }}
@@ -235,7 +235,7 @@ jobs:
           echo "OpenWrt release tree: ${BASE} (fallback: ${FALLBACK_BASE:-none})"
 
           # Takes the file from the fallback mirror when the primary does not
-          # serve it, so a single missing file does not fail the whole matrix.
+          # serve it, so a single missing file does not fail the whole run.
           # Each attempt is printed, so the log names every URL that was used.
           fetch() {
             local urls=("${BASE}/$1") url
@@ -270,7 +270,8 @@ jobs:
           RELEASE_DATE="$(date -u +%Y%m%d)"
           echo "Release date: ${RELEASE_DATE}"
 
-          : > /tmp/matrix.jsonl
+          : > /tmp/targets.jsonl
+          : > /tmp/arches.jsonl
           : > /tmp/sdk-urls.md
           {
             echo "### OpenWrt ${OPENWRT_VERSION}"
@@ -283,13 +284,42 @@ jobs:
             echo "|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # The expected arch_packages is verified against profiles.json, so a
-          # wrong target/subtarget pairing fails here instead of silently
-          # producing a vmlinux for the wrong architecture.
-          while IFS='|' read -r openwrt_arch target subtarget kernel_arch; do
-            case "${openwrt_arch}" in
-              "" | "#"*) continue ;;
-            esac
+          # The supported architectures (arch_packages), with their kernel arch
+          # and the target dae and honk are built with: those packages only
+          # depend on the architecture, so one SDK of it is enough
+          grep -v '^#' > /tmp/arches.txt <<'ARCHES'
+          # openwrt_arch|kernel_arch|target/subtarget of dae and honk
+          x86_64|x86_64|x86/64
+          aarch64_generic|arm64|armsr/armv8
+          aarch64_cortex-a53|arm64|mediatek/filogic
+          aarch64_cortex-a72|arm64|bcm27xx/bcm2711
+          aarch64_cortex-a76|arm64|bcm27xx/bcm2712
+          ARCHES
+
+          # The BTF follows the kernel .config of each target (struct offsets
+          # differ between targets of one architecture), so vmlinux-btf is built
+          # for every target of those architectures. .targets.json maps each
+          # target of the release to its arch_packages.
+          if ! targets_json="$(fetch .targets.json)"; then
+            echo "::error::.targets.json of OpenWrt ${OPENWRT_VERSION} is not available on any mirror"
+            exit 1
+          fi
+          supported="$(cut -d'|' -f1 /tmp/arches.txt | jq -Rsc 'split("\n") | map(select(. != ""))')"
+          mapfile -t targets < <(jq -r --argjson supported "${supported}" \
+            'to_entries[] | select(.value | IN($supported[])) | .key + "|" + .value' \
+            <<< "${targets_json}" | sort)
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "::error::OpenWrt ${OPENWRT_VERSION} has no target of the architectures ${supported}"
+            exit 1
+          fi
+
+          # The arch_packages of .targets.json is verified against profiles.json
+          # as well, so a target is never built for the wrong architecture
+          for entry in "${targets[@]}"; do
+            IFS='|' read -r path openwrt_arch <<< "${entry}"
+            target="${path%%/*}"
+            subtarget="${path#*/}"
+            kernel_arch="$(awk -F'|' -v arch="${openwrt_arch}" '$1 == arch { print $2 }' /tmp/arches.txt)"
 
             url="${BASE}/targets/${target}/${subtarget}"
 
@@ -337,15 +367,8 @@ jobs:
               fi
             } >> /tmp/sdk-urls.md
 
-            dist_name="${OPENWRT_VERSION}-vmlinux-${openwrt_arch}-${kernel_version}"
-            # The BTF package depends on the kernel, so its version (and name)
-            # carries the kernel version; the userspace packages are pinned to
-            # upstream releases and only carry that version, so they are named
-            # here and reused by the build and release jobs
-            btf_dist_name="${OPENWRT_VERSION}-vmlinux-btf-${openwrt_arch}-${kernel_version}"
-            dae_dist_name="${OPENWRT_VERSION}-dae-${DAE_VERSION}-${openwrt_arch}"
-            honk_dist_name="${OPENWRT_VERSION}-honk-${HONK_VERSION}-${openwrt_arch}"
-
+            # The BTF depends on the target and its kernel, so both are part
+            # of the names
             jq -nc \
               --arg openwrt_arch "${openwrt_arch}" \
               --arg target "${target}" \
@@ -355,32 +378,39 @@ jobs:
               --arg sdk_url "${sdk_url}" \
               --arg sdk_fallback_url "${sdk_fallback_url}" \
               --arg sdk_name "${sdk_name}" \
-              --arg dist_name "${dist_name}" \
-              --arg btf_dist_name "${btf_dist_name}" \
-              --arg dae_version "${DAE_VERSION}" \
-              --arg dae_git_tag "${DAE_GIT_TAG}" \
-              --arg dae_dist_name "${dae_dist_name}" \
-              --arg honk_version "${HONK_VERSION}" \
-              --arg honk_git_tag "${HONK_GIT_TAG}" \
-              --arg honk_dist_name "${honk_dist_name}" \
-              '{openwrt_arch:$openwrt_arch,target:$target,subtarget:$subtarget,kernel_arch:$kernel_arch,kernel_version:$kernel_version,sdk_url:$sdk_url,sdk_fallback_url:$sdk_fallback_url,sdk_name:$sdk_name,dist_name:$dist_name,btf_dist_name:$btf_dist_name,dae_version:$dae_version,dae_git_tag:$dae_git_tag,dae_dist_name:$dae_dist_name,honk_version:$honk_version,honk_git_tag:$honk_git_tag,honk_dist_name:$honk_dist_name}' \
-              >> /tmp/matrix.jsonl
+              --arg dist_name "${OPENWRT_VERSION}-vmlinux-${target}-${subtarget}-${kernel_version}" \
+              --arg btf_dist_name "${OPENWRT_VERSION}-vmlinux-btf-${target}-${subtarget}-${kernel_version}" \
+              '$ARGS.named' >> /tmp/targets.jsonl
 
             echo "| ${openwrt_arch} | ${target}/${subtarget} | ${kernel_version} | ${sdk_name} |" >> "$GITHUB_STEP_SUMMARY"
-          done <<'TARGETS'
-          # openwrt_arch|target|subtarget|kernel_arch
-          x86_64|x86|64|x86_64
-          aarch64_generic|armsr|armv8|arm64
-          aarch64_cortex-a53|mediatek|filogic|arm64
-          aarch64_cortex-a72|bcm27xx|bcm2711|arm64
-          aarch64_cortex-a76|bcm27xx|bcm2712|arm64
-          TARGETS
+          done
 
-          echo "Resolved $(wc -l < /tmp/matrix.jsonl) targets"
+          # dae and honk, one row per architecture with the SDK of its target
+          # above. They are pinned to upstream releases and only carry that
+          # version, so they are named here and reused by the build and release
+          # jobs.
+          while IFS='|' read -r openwrt_arch kernel_arch path; do
+            if ! jq -ec --arg arch "${openwrt_arch}" --arg path "${path}" \
+              --arg dae_version "${DAE_VERSION}" \
+              --arg dae_git_tag "${DAE_GIT_TAG}" \
+              --arg dae_dist_name "${OPENWRT_VERSION}-dae-${DAE_VERSION}-${openwrt_arch}" \
+              --arg honk_version "${HONK_VERSION}" \
+              --arg honk_git_tag "${HONK_GIT_TAG}" \
+              --arg honk_dist_name "${OPENWRT_VERSION}-honk-${HONK_VERSION}-${openwrt_arch}" \
+              'select(.openwrt_arch == $arch and .target + "/" + .subtarget == $path)
+                | {openwrt_arch, target, subtarget, kernel_arch, sdk_url, sdk_fallback_url, sdk_name}
+                + ($ARGS.named | del(.arch, .path))' \
+              /tmp/targets.jsonl >> /tmp/arches.jsonl; then
+              echo "::error::${openwrt_arch}: ${path} is not one of its targets in OpenWrt ${OPENWRT_VERSION}"
+              exit 1
+            fi
+          done < /tmp/arches.txt
+
+          echo "Resolved $(wc -l < /tmp/targets.jsonl) targets and $(wc -l < /tmp/arches.jsonl) architectures"
 
           {
             echo ""
-            echo "Packages: vmlinux-btf \`<kernel version>\` (one per architecture), dae \`${DAE_VERSION}\` (tag \`${DAE_GIT_TAG}\`), honk \`${HONK_VERSION}\` (tag \`${HONK_GIT_TAG}\`, full feature set with the embedded doona UI)."
+            echo "Packages: vmlinux-btf \`<kernel version>\` (one per target), dae \`${DAE_VERSION}\` (tag \`${DAE_GIT_TAG}\`) and honk \`${HONK_VERSION}\` (tag \`${HONK_GIT_TAG}\`, full feature set with the embedded doona UI), one per architecture, built with the SDK of: $(jq -r '.target + "/" + .subtarget' /tmp/arches.jsonl | paste -sd ' ')."
             echo ""
             echo "Release tags: \`openwrt-${OPENWRT_VERSION}-<kernel version>-${RELEASE_DATE}\`"
             echo ""
@@ -392,11 +422,12 @@ jobs:
           {
             echo "openwrt_version=${OPENWRT_VERSION}"
             echo "release_date=${RELEASE_DATE}"
-            echo "matrix=$(jq -sc . /tmp/matrix.jsonl)"
+            echo "targets=$(jq -sc . /tmp/targets.jsonl)"
+            echo "arches=$(jq -sc . /tmp/arches.jsonl)"
           } >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
-  # 2. Generate one detached BTF blob (and its package) per OpenWrt architecture
+  # 2. Generate one detached BTF blob (and its package) per target
   #
   # This follows the current upstream implementation: small stub units are
   # compiled against the kernel headers the SDK already prepared, and pahole
@@ -405,7 +436,7 @@ jobs:
   # archive and the installable package always hold identical bytes.
   # ---------------------------------------------------------------------------
   build:
-    name: Build vmlinux (${{ matrix.openwrt_arch }})
+    name: Build vmlinux (${{ matrix.target }}/${{ matrix.subtarget }})
     needs: prepare
     runs-on: ubuntu-latest
     # Compiling the stubs is fast; downloading and extracting the SDK dominates
@@ -413,10 +444,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+        include: ${{ fromJSON(needs.prepare.outputs.targets) }}
     env:
       OPENWRT_VERSION: ${{ needs.prepare.outputs.openwrt_version }}
       OPENWRT_ARCH: ${{ matrix.openwrt_arch }}
+      OPENWRT_TARGET: ${{ matrix.target }}/${{ matrix.subtarget }}
       KERNEL_ARCH: ${{ matrix.kernel_arch }}
       KERNEL_VERSION: ${{ matrix.kernel_version }}
       SDK_URL: ${{ matrix.sdk_url }}
@@ -819,7 +851,7 @@ jobs:
             echo "- Package: \`$(basename "${found[0]}")\`"
             echo "- Version: \`${KERNEL_VERSION}\` (kernel version)"
             echo "- Kernel release: \`${KERNEL_RELEASE}\`"
-            echo "- OpenWrt arch: \`${OPENWRT_ARCH}\`"
+            echo "- Target: \`${OPENWRT_TARGET}\` (\`${OPENWRT_ARCH}\`)"
             echo "- SHA256: \`$(cut -d' ' -f1 "dist/${BTF_DIST_NAME}.apk.sha256")\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -856,7 +888,7 @@ jobs:
             echo '```'
             echo ""
             echo "- OpenWrt version: \`${OPENWRT_VERSION}\`"
-            echo "- OpenWrt arch: \`${OPENWRT_ARCH}\`"
+            echo "- Target: \`${OPENWRT_TARGET}\` (\`${OPENWRT_ARCH}\`)"
             echo "- Kernel version: \`${KERNEL_VERSION}\`"
             echo "- Kernel headers: \`${KDIR}\`"
             echo "- pahole: \`$(pahole --version)\`"
@@ -880,7 +912,7 @@ jobs:
   # only install the toolchains and let the SDK build them. dae is pure Go
   # (CGO_ENABLED=0); honk uses the SDK cross toolchain because its C/C++
   # dependencies and the final link need the target compiler and musl.
-  # Both are pinned to upstream release tags, the versions come from the matrix.
+  # Both are pinned to upstream release tags, the versions come from prepare.
   # ---------------------------------------------------------------------------
   dae:
     name: Build dae (${{ matrix.openwrt_arch }})
@@ -889,9 +921,9 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      # One build per OpenWrt architecture, like the kernel assets
+      # One build per OpenWrt architecture
       matrix:
-        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+        include: ${{ fromJSON(needs.prepare.outputs.arches) }}
     env:
       # No kernel version here: the userspace assets carry the pinned upstream
       # version instead (see the header comment)
@@ -1029,10 +1061,10 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      # One build per OpenWrt architecture, like the kernel assets: the Rust
-      # target and the C/C++ compiler both come from that architecture's SDK
+      # One build per OpenWrt architecture: the Rust target and the C/C++
+      # compiler both come from that architecture's SDK
       matrix:
-        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+        include: ${{ fromJSON(needs.prepare.outputs.arches) }}
     env:
       # No kernel version here: the userspace assets carry the pinned upstream
       # version instead (see the header comment)
@@ -1225,9 +1257,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      SDK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_url }}
-      SDK_FALLBACK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_fallback_url }}
-      SDK_NAME: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_name }}
+      SDK_URL: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_url }}
+      SDK_FALLBACK_URL: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_fallback_url }}
+      SDK_NAME: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_name }}
     steps:
       # luci.mk versions a package by the last commit that touched it, which a
       # shallow clone would make the current commit for every package
@@ -1334,7 +1366,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
       OPENWRT_VERSION: ${{ needs.prepare.outputs.openwrt_version }}
       RELEASE_DATE: ${{ needs.prepare.outputs.release_date }}
-      MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+      TARGETS_JSON: ${{ needs.prepare.outputs.targets }}
+      ARCHES_JSON: ${{ needs.prepare.outputs.arches }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1352,9 +1385,9 @@ jobs:
           state="${RUNNER_TEMP}/release-state.jsonl"
           : > "${state}"
 
-          mapfile -t kernel_versions < <(jq -r '[.[].kernel_version] | unique[]' <<< "${MATRIX_JSON}")
+          mapfile -t kernel_versions < <(jq -r '[.[].kernel_version] | unique[]' <<< "${TARGETS_JSON}")
           if [ "${#kernel_versions[@]}" -eq 0 ]; then
-            echo "::error::The build matrix does not contain any kernel version"
+            echo "::error::The targets do not report any kernel version"
             exit 1
           fi
 
@@ -1404,13 +1437,13 @@ jobs:
             fi
 
             mapfile -t assets < <(jq -r --arg kv "${kernel_version}" \
-              '.[] | select(.kernel_version == $kv) | "- " + .dist_name + ".tar.xz  (OpenWrt arch " + .openwrt_arch + ", " + .target + "/" + .subtarget + ")"' \
-              <<< "${MATRIX_JSON}")
+              '.[] | select(.kernel_version == $kv) | "- " + .dist_name + ".tar.xz  (" + .target + "/" + .subtarget + ", OpenWrt arch " + .openwrt_arch + ")"' \
+              <<< "${TARGETS_JSON}")
 
-            # The same blob as an installable package, one per architecture
+            # The same blob as an installable package, one per target
             mapfile -t btf_assets < <(jq -r --arg kv "${kernel_version}" \
-              '.[] | select(.kernel_version == $kv) | "- " + .btf_dist_name + ".apk  (OpenWrt arch " + .openwrt_arch + ")"' \
-              <<< "${MATRIX_JSON}")
+              '.[] | select(.kernel_version == $kv) | "- " + .btf_dist_name + ".apk  (" + .target + "/" + .subtarget + ")"' \
+              <<< "${TARGETS_JSON}")
 
             # Every build job signs its .apk and fails otherwise, so a release
             # that reaches this step has no unsigned package to explain
@@ -1433,7 +1466,7 @@ jobs:
           $(printf '%s\n' "${assets[@]}")
 
           The same BTF blob is published as an installable package of this
-          OpenWrt version, one signed .apk per architecture:
+          OpenWrt version, one signed .apk per target:
 
           $(printf '%s\n' "${btf_assets[@]}")
 
@@ -1485,7 +1518,7 @@ jobs:
 
             files=()
             mapfile -t dist_names < <(jq -r --arg kv "${kernel_version}" \
-              '.[] | select(.kernel_version == $kv) | .dist_name' <<< "${MATRIX_JSON}")
+              '.[] | select(.kernel_version == $kv) | .dist_name' <<< "${TARGETS_JSON}")
 
             for dist_name in "${dist_names[@]}"; do
               if [ -f "dist/${dist_name}.tar.xz" ]; then
@@ -1499,7 +1532,7 @@ jobs:
             # The vmlinux-btf package belongs to this kernel version as well.
             # Only the signed .apk and its checksum are release assets.
             mapfile -t btf_names < <(jq -r --arg kv "${kernel_version}" \
-              '.[] | select(.kernel_version == $kv) | .btf_dist_name' <<< "${MATRIX_JSON}")
+              '.[] | select(.kernel_version == $kv) | .btf_dist_name' <<< "${TARGETS_JSON}")
 
             for name in "${btf_names[@]}"; do
               for path in "dist/${name}.apk" "dist/${name}.apk.sha256"; do
@@ -1514,9 +1547,9 @@ jobs:
 
             # Userspace packages: they do not depend on the kernel version, so
             # every release published by this run carries the full set. Their
-            # names come from the matrix (pinned upstream version), one signed
+            # names come from prepare (pinned upstream version), one signed
             # .apk per OpenWrt architecture.
-            mapfile -t userspace_names < <(jq -r '[.[] | .dae_dist_name, .honk_dist_name] | unique[]' <<< "${MATRIX_JSON}")
+            mapfile -t userspace_names < <(jq -r '.[] | .dae_dist_name, .honk_dist_name' <<< "${ARCHES_JSON}")
 
             for name in "${userspace_names[@]}"; do
               for path in "dist/${name}.apk" "dist/${name}.apk.sha256"; do
@@ -1589,13 +1622,14 @@ jobs:
     timeout-minutes: 30
     env:
       OPENWRT_VERSION: ${{ needs.prepare.outputs.openwrt_version }}
-      MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+      TARGETS_JSON: ${{ needs.prepare.outputs.targets }}
+      ARCHES_JSON: ${{ needs.prepare.outputs.arches }}
       # runner.temp is not available at job level
       SITE_DIR: ${{ github.workspace }}/_site
       # Only for its apk-tools, the same that built and signed the packages
-      SDK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_url }}
-      SDK_FALLBACK_URL: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_fallback_url }}
-      SDK_NAME: ${{ fromJSON(needs.prepare.outputs.matrix)[0].sdk_name }}
+      SDK_URL: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_url }}
+      SDK_FALLBACK_URL: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_fallback_url }}
+      SDK_NAME: ${{ fromJSON(needs.prepare.outputs.arches)[0].sdk_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1637,14 +1671,16 @@ jobs:
             install -D -m 644 "$1" "$2/${name}-${version}.apk"
           }
 
-          while IFS=$'\t' read -r arch target subtarget btf dae honk; do
+          while IFS=$'\t' read -r arch dae honk; do
             place "dist/${dae}.apk" "${root}/packages/${arch}"
             place "dist/${honk}.apk" "${root}/packages/${arch}"
             for luci in dist/luci-*.apk; do
               place "${luci}" "${root}/packages/${arch}"
             done
+          done < <(jq -r '.[] | [.openwrt_arch, .dae_dist_name, .honk_dist_name] | @tsv' <<< "${ARCHES_JSON}")
+          while IFS=$'\t' read -r target subtarget btf; do
             place "dist/${btf}.apk" "${root}/kmods/${OPENWRT_VERSION}/${target}/${subtarget}"
-          done < <(jq -r '.[] | [.openwrt_arch, .target, .subtarget, .btf_dist_name, .dae_dist_name, .honk_dist_name] | @tsv' <<< "${MATRIX_JSON}")
+          done < <(jq -r '.[] | [.target, .subtarget, .btf_dist_name] | @tsv' <<< "${TARGETS_JSON}")
 
           # mkndx checks every package against the committed public key, so an
           # unsigned or foreign package fails here
